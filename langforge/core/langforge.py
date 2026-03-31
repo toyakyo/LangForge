@@ -1,0 +1,6117 @@
+"""LangForge V1.0.1-beta.5
+AI-powered game screenshot translation tool.
+
+Copyright (c) 2026 Toya Kyo (GoOnSoft)
+GitHub : https://github.com/toyakyo
+License: Copyright © 2026 GoOnSoft. All rights reserved.
+
+需要安裝的第三方套件（一鍵安裝）:
+  pip install anthropic google-genai groq keyboard mistralai openai pillow pywin32
+"""
+
+import threading
+import queue
+import tkinter as tk
+from tkinter import ttk, filedialog
+import sys, os, ctypes, shutil, io, json, time, re, base64
+from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageGrab
+import win32gui, win32con
+try:
+    import keyboard  # pip install keyboard
+    HAS_KEYBOARD = True
+except ImportError:
+    HAS_KEYBOARD = False
+
+# ==========================================
+# 讀取 platforms.json
+# ==========================================
+def _load_platforms():
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'asset', 'data', 'platforms.json')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data.get('platforms', {})
+    except Exception as e:
+        import sys
+        print(f'[LangForge] 載入 platforms.json 失敗: {e}', file=sys.stderr)
+        return {}
+
+PLATFORMS = _load_platforms()
+
+
+# ==========================================
+# 讀取 emulators.json
+# ==========================================
+def _load_emulators():
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'asset', 'data', 'emulators.json')
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data.get('platforms', {})
+    except Exception as e:
+        print(f'[LangForge] 載入 emulators.json 失敗: {e}', file=sys.stderr)
+        return {}
+
+EMULATORS = _load_emulators()
+
+def _save_platforms(data: dict):
+    """將 dict 寫回 platforms.json"""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'asset', 'data', 'platforms.json')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump({'platforms': data}, f, ensure_ascii=False, indent=2)
+
+def _save_emulators(data: dict):
+    """將 dict 寫回 emulators.json"""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'asset', 'data', 'emulators.json')
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump({'platforms': data}, f, ensure_ascii=False, indent=2)
+
+
+
+# ==========================================
+# 應用程式圖示
+# ==========================================
+def _load_app_icon(window) -> None:
+    """將 favicon.ico 套用至指定視窗的標題列與工作列。
+    favicon.ico 需與程式放在同一目錄；找不到時靜默略過，不影響程式運作。
+    優先使用 iconbitmap（Windows 原生 .ico 支援）；
+    失敗時退回 iconphoto（跨平台備案，以 Pillow 轉換）。
+    """
+    ico_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'asset', 'icons', 'langforgefavicon256x256.png')
+    if not os.path.exists(ico_path):
+        return
+    try:
+        # Windows 原生方式：直接吃 .ico，標題列 + 工作列均生效
+        window.iconbitmap(ico_path)
+    except Exception:
+        try:
+            # 備用：Pillow 轉 PhotoImage（跨平台；工作列圖示視平台而定）
+            _ico_img = Image.open(ico_path).resize((32, 32), Image.LANCZOS)
+            _ico_photo = ImageTk.PhotoImage(_ico_img)
+            window.iconphoto(True, _ico_photo)
+            # 防止 GC 回收（PhotoImage 必須有強參考才不會消失）
+            window._icon_photo_ref = _ico_photo  # type: ignore[attr-defined]
+        except Exception:
+            pass  # 圖示載入失敗不中斷程式
+
+
+# ==========================================
+# 關於資訊常數
+# ==========================================
+ABOUT_VERSION = 'V1.0.1-beta.5'
+ABOUT_GITHUB  = 'https://github.com/toyakyo'
+ABOUT_AUTHOR  = 'Toya Kyo'
+ABOUT_LICENSE = 'Copyright © 2026 GoOnSoft. All rights reserved.'
+TUTORIAL_URL  = 'https://goonsoft.tw2.nde.tw/tutorial/tutorial.php'
+
+# ==========================================
+# 多語系 UI 字串
+# ==========================================
+UI_STRINGS = {
+    'zh': {
+        # ── 頁籤 ──
+        'tab_translate':    '  翻譯操作  ',
+        'tab_capture':      '  擷取設定  ',
+        'tab_quota':        '  引擎配額  ',
+        'tab_history':      '  歷史翻譯  ',
+        'tab_guide':        '  歷史攻略  ',
+        'tab_session':      '  歷史錄製  ',
+        # ── Tab1 翻譯操作 ──
+        'lbl_engine':       '翻譯引擎:',
+        'rb_engine_cloud':  '☁ 雲端引擎',
+        'rb_engine_local':  '🦙 本地引擎 (OLLAMA)',
+        'rb_engine_ocr':    '🔍 本地OCR+Google翻譯',
+        'all_games': '全部遊戲',
+        'all_windows': '全部視窗',
+        'all_platforms': '全部平台',
+        'ind_auto': '自動',
+        'ind_guide': '攻略',
+        'ind_hotkey': '擷取鍵',
+        'ind_guide_hotkey': '攻略鍵',
+        'lbl_available': '可用',
+        'stable_hint': '(差異門檻 0~255，次數×500ms=等待秒數)',
+        'th_size': '大小',
+        'btn_capture_trans':    '視窗擷取翻譯',
+        'btn_default_engine':   '設為預設',
+        'btn_ok':               '確定',
+        'lbl_diff_threshold':   '差異門檻',
+        'rb_winmode_corner':    '角落模式',
+        'lbl_api_key':      'Gemini API Key:',
+        'lbl_model':        '模型:',
+        'btn_default_engine':'預設引擎',
+        'lbl_custom_model': '自訂模型:',
+        'btn_add':          '新增',
+        'btn_cancel':       '取消',
+        'btn_remove':       '移除',
+        'lf_lang':          '語言設定',
+        'lbl_src_lang':     '遊戲語言:',
+        'lbl_tgt_lang':     '譯文語言:',
+        'lbl_layout':       '文字排版模式:',
+        'rb_horizontal':    '橫排（文句左至右）',
+        'rb_vertical':      '直排（文上至下、句右至左）',
+        'lf_platform':      '遊戲平台紀錄以',
+        'rb_platform_mode': '遊戲平台為主',
+        'rb_emulator_mode': '模擬器為主',
+        'lbl_category':     '主類別:',
+        'lbl_platform':     '平台:',
+        'btn_capture_trans':'視窗擷取翻譯',
+        'btn_file_trans':   '選擇圖片翻譯',
+        'btn_guide':        '目前攻略資訊',
+        'btn_auto_cap_on':  '停止自動擷取',
+        'btn_auto_cap_off': '自動擷取',
+        'btn_auto_cap_tooltip': '自動擷取功能請至「擷取設定」頁籤中開啟',
+        'status_ready':     '狀態: 就緒',
+        # ── Tab2 擷取設定 ──
+        'lbl_target_win':   '目標視窗標題 (部分匹配):',
+        'btn_pick_window':   '🖱 點選視窗',
+        'lbl_pick_hint':    '5秒內請點選目標視窗…',
+        'lbl_crop_top':     '裁切頂部(px):',
+        'lbl_crop_hint':    '（選單列高度，0=不裁切）',
+        'lf_winmode':       '視窗依附模式',
+        'rb_winmode_main':  '依附主視窗',
+        'rb_winmode_mesen': '依附目標視窗',
+        'rb_winmode_corner':'螢幕角落（翻譯右上 / 攻略右下）',
+        'rb_winmode_sides': '目標視窗兩側（攻略左邊 / 翻譯右邊）',
+        'lbl_hotkey':       '擷取翻譯快捷鍵:',
+        'btn_enable':       '啟用',
+        'btn_disable':      '停用',
+        'lbl_hotkey_off':   '未啟用',
+        'lbl_guide_hotkey': '攻略資訊快捷鍵:',
+        'cb_combo_guide':   '截取翻譯時同時要求攻略',
+        # ── 自動翻譯 ──
+        'lf_auto_trans':     '自動翻譯設定',
+        'cb_auto_trans':     '啟用畫面穩定自動翻譯',
+        'lbl_diff_threshold':'差異門檻:',
+        'lbl_stable_count':  '穩定次數:',
+        'status_on':         '運行中',
+        'status_off':        '關閉中',
+        'lbl_combo_on':     '開啟中',
+        'lbl_combo_off':    '關閉中',
+        'lbl_screen':       '主視窗所在螢幕:',
+        # ── Tab3 引擎配額 ──
+        'lbl_quota_title':  '今日各引擎使用量',
+        'btn_refresh':      '🔄 重新整理',
+        # ── Tab4 歷史翻譯 ──
+        'lbl_game':         '遊戲:',
+        'lbl_window':       '視窗:',
+        'lbl_platform_f':   '平台:',
+        'btn_delete':       '刪除此筆',
+        'th_id':            '筆次',
+        'th_time':          '時間',
+        'th_model':         '模型',
+        'th_rom':           'ROM名稱',
+        'th_window':        '視窗',
+        'th_platform':      '平台',
+        'lf_fix_platform':  '修正平台',
+        'lbl_fix_mode':     '模式:',
+        'lbl_fix_cat':      '主類別:',
+        'lbl_fix_plat':     '平台:',
+        'btn_apply_plat':   '套用至此遊戲所有紀錄',
+        'btn_overlay':      '疊圖模式 ✓',
+        'btn_plain':        '純圖模式   ',
+        # ── Tab5 歷史攻略 ──
+        'th_progress':      '進度摘要',
+        'lbl_curr_prog':    '【目前進度】',
+        'lbl_curr_guide':   '【攻略建議】',
+        # ── Tab3 配額表欄位 ──
+        'th_engine':        '引擎',
+        'th_used':          '已用',
+        'th_limit':         '上限',
+        'quota_no_limit':   '無額度',
+        'quota_no_free':    '⚠ 無免費額度',
+        'quota_switch':     '無免費額度 (limit=0)，請換模型',
+        # ── 選單列 ──
+        'menu_file':        '檔案',
+        'menu_exit':        '結束',
+        'menu_view':        '檢視',
+        'menu_switch_lang': '切換介面語言',
+        'menu_lang_zh':     '中文',
+        'menu_lang_en':     'English',
+        'menu_edit_platforms': '平台編輯器',
+        'menu_help':        '說明',
+        'menu_tutorial':    'LangForge 教學',
+        'menu_platform_editor': '平台編輯器',
+        'menu_about':       '關於 LangForge',
+        # ── 狀態訊息 ──
+        'status_reading':   '讀取圖片中...',
+        'status_img_fail':  '圖片讀取失敗',
+        'status_capturing': '擷取畫面中...',
+        'status_no_win':    '找不到目標視窗',
+        'status_guide_analyzing': '攻略分析中...',
+        'status_guide_done':'攻略分析完成',
+        'status_trans_done':'翻譯完成',
+        'status_no_key':    '請輸入 API Key',
+        'status_quota_done':'所有模型額度已用完',
+        'status_key_needed':'請輸入 {engine} API Key',
+        'status_keyboard_need': '需安裝 keyboard 模組: pip install keyboard',
+        'status_hotkey_fail': '快捷鍵設定失敗: {err}',
+        'status_guide_hotkey_fail': '攻略快捷鍵設定失敗: {err}',
+        'status_win_exists':'目標視窗已存在: {name}',
+        'status_win_added': '已新增: {name}',
+        'status_win_notfound': '找不到: {name}',
+        'status_win_removed': '已移除: {name}',
+        'status_model_exists': '模型已存在: {model}',
+        'status_model_added': '已新增: {model}',
+        'status_model_removed': '已移除: {model}',
+        'status_builtin_no_remove': '內建模型無法移除',
+        'status_no_model_remove': '找不到可移除的模型',
+        'status_default_saved': '預設已儲存：{engine} / {model}',
+        'status_hotkey_on': '已啟用: {key}',
+        'status_queue_full':    '請求佇列已滿（上限10條），請稍後再試',
+        'status_queue_waiting': '佇列等待中（{n} 個任務）',
+        # ── OLLAMA ──
+        'lf_ollama':              '🦙 OLLAMA 本地引擎',
+        'lbl_ollama_detected':    '偵測到本地 OLLAMA，以下為已安裝的模型：',
+        'cb_use_ollama':          '優先使用 OLLAMA（忽略雲端 API Key）',
+        'lbl_ollama_timeout':     'Timeout(秒):',
+        'cb_vision_filter':       '僅顯示 VLM（視覺語言模型）',
+        'lf_session':          '場次錄製',
+        'btn_start_session':   '開始場次錄製',
+        'btn_stop_session':    '結束場次',
+        'btn_open_playback':   '開啟播放視窗',
+        'session_idle':        '未錄製',
+        'session_recording':   '錄製中...',
+        'th_session_game':  '遊戲',
+        'th_session_start':  '開始時間',
+        'th_session_frames': '幀數',
+        'th_session_plat':   '平台',
+        'btn_session_replay': '▶ 回放此場次',
+        'btn_session_delete': '刪除場次',
+        'session_no_select':  '請先選取場次',
+        'btn_stop_playback':   '■ 停止播放',
+        'status_ollama_timeout':  'OLLAMA 推理逾時，請增加 Timeout 或換小模型',
+        'status_ollama_fail':     'OLLAMA 呼叫失敗: {err}',
+        'status_ollama_no_model': '請選擇 OLLAMA 模型',
+    },
+    'en': {
+        # ── Tabs ──
+        'tab_translate':    '  Translate  ',
+        'tab_capture':      '  Capture  ',
+        'tab_quota':        '  Quota  ',
+        'tab_history':      '  History  ',
+        'tab_guide':        '  Guide  ',
+        'tab_session':      '  Sessions  ',
+        # ── Tab1 ──
+        'lbl_engine':       'Engine:',
+        'rb_engine_cloud':  '☁ Cloud Engine',
+        'rb_engine_local':  '🦙 Local (OLLAMA)',
+        'rb_engine_ocr':    '🔍 Local OCR+Google Translate',
+        'all_games': 'All Games',
+        'all_windows': 'All Windows',
+        'all_platforms': 'All Platforms',
+        'ind_auto': 'Auto',
+        'ind_guide': 'Guide',
+        'ind_hotkey': 'Hotkey',
+        'ind_guide_hotkey': 'G.Key',
+        'lbl_available': 'Available',
+        'stable_hint': '(Diff 0~255, Count×500ms=wait sec)',
+        'th_size': 'Size',
+        'btn_open_playback':          'Open Playback',
+        'btn_session_delete':          'Delete Session',
+        'btn_session_replay':          '▶ Replay Session',
+        'btn_start_session':           'Start Recording',
+        'btn_stop_playback':           '■ Stop Playback',
+        'btn_stop_session':            'End Session',
+        'cb_use_ollama':               'Use OLLAMA (ignore cloud API Key)',
+        'cb_vision_filter':            'Show VLM only (Vision Language Models)',
+        'lbl_ollama_detected':         'Local OLLAMA detected. Installed models:',
+        'lbl_ollama_timeout':          'Timeout(s):',
+        'lf_ollama':                   '🦙 OLLAMA Local Engine',
+        'lf_session':                  'Session Recording',
+        'session_idle':                'Idle',
+        'session_no_select':           'Please select a session',
+        'session_recording':           'Recording...',
+        'status_builtin_no_remove':    'Built-in models cannot be removed',
+        'status_default_saved':        'Default saved: {engine} / {model}',
+        'status_guide_hotkey_fail':    'Guide hotkey failed: {err}',
+        'status_hotkey_fail':          'Hotkey failed: {err}',
+        'status_hotkey_on':            'Enabled: {key}',
+        'status_keyboard_need':        'keyboard module required: pip install keyboard',
+        'status_model_added':          'Added: {model}',
+        'status_model_exists':         'Model already exists: {model}',
+        'status_model_removed':        'Removed: {model}',
+        'status_no_model_remove':      'No model found to remove',
+        'status_ollama_fail':          'OLLAMA call failed: {err}',
+        'status_ollama_no_model':      'Please select an OLLAMA model',
+        'status_ollama_timeout':       'OLLAMA timed out. Increase Timeout or use a smaller model',
+        'status_queue_full':           'Queue full (max 10). Please wait.',
+        'status_queue_waiting':        'Queued ({n} tasks)',
+        'status_win_added':            'Added: {name}',
+        'status_win_notfound':         'Not found: {name}',
+        'status_win_removed':          'Removed: {name}',
+        'th_session_frames':           'Frames',
+        'th_session_game':             'Game',
+        'th_session_plat':             'Platform',
+        'th_session_start':            'Started',
+        'btn_capture_trans':           'Capture & Translate',
+        'btn_default_engine':          'Set as Default',
+        'btn_ok':                      'OK',
+        'lbl_diff_threshold':          'Diff Threshold',
+        'rb_winmode_corner':           'Corner',
+        'lbl_api_key':      'Gemini API Key:',
+        'lbl_model':        'Model:',
+        'btn_default_engine':'Default Engine',
+        'lbl_custom_model': 'Custom Model:',
+        'btn_add':          'Add',
+        'btn_cancel':       'Cancel',
+        'btn_remove':       'Remove',
+        'lf_lang':          'Language',
+        'lbl_src_lang':     'Game Language:',
+        'lbl_tgt_lang':     'Target Language:',
+        'lbl_layout':       'Text Layout:',
+        'rb_horizontal':    'Horizontal (L→R)',
+        'rb_vertical':      'Vertical (Top→Bottom, R→L)',
+        'lf_platform':      'Record Game Platform as...',
+        'rb_platform_mode': 'By Platform',
+        'rb_emulator_mode': 'By Emulator',
+        'lbl_category':     'Category:',
+        'lbl_platform':     'Platform:',
+        'btn_capture_trans':'Capture & Translate',
+        'btn_file_trans':   'File Translate',
+        'btn_guide':        'Guide Info',
+        'btn_auto_cap_on':  'Stop Auto Capture',
+        'btn_auto_cap_off': 'Auto Capture',
+        'btn_auto_cap_tooltip': 'Enable auto capture in the Capture Settings tab',
+        'status_ready':     'Status: Ready',
+        # ── Tab2 ──
+        'lbl_target_win':   'Target Window Title (partial match):',
+        'btn_pick_window':   '🖱 Pick Window',
+        'lbl_pick_hint':    'Click target window within 5s…',
+        'lbl_crop_top':     'Crop Top (px):',
+        'lbl_crop_hint':    '(menu bar height, 0=no crop)',
+        'lf_winmode':       'Window Attach Mode',
+        'rb_winmode_main':  'Follow Main Window',
+        'rb_winmode_mesen': 'Follow Target Window',
+        'rb_winmode_corner':'Screen Corner (Translate TR / Guide BR)',
+        'rb_winmode_sides': 'Target Window Sides (Guide Left / Translate Right)',
+        'lbl_hotkey':       'Capture Hotkey:',
+        'btn_enable':       'Enable',
+        'btn_disable':      'Disable',
+        'lbl_hotkey_off':   'Disabled',
+        'lbl_guide_hotkey': 'Guide Hotkey:',
+        'cb_combo_guide':   'Request guide on capture',
+        # ── Auto Translate ──
+        'lf_auto_trans':     'Auto Translate',
+        'cb_auto_trans':     'Enable Scene-Stable Auto Translate',
+        'lbl_diff_threshold':'Diff Threshold:',
+        'lbl_stable_count':  'Stable Count:',
+        'status_on':         'Running',
+        'status_off':        'Off',
+        'lbl_combo_on':     'ON',
+        'lbl_combo_off':    'OFF',
+        'lbl_screen':       'Main Window Screen:',
+        # ── Tab3 ──
+        'lbl_quota_title':  "Today's Engine Usage",
+        'btn_refresh':      '🔄 Refresh',
+        # ── Tab4 ──
+        'lbl_game':         'Game:',
+        'lbl_window':       'Window:',
+        'lbl_platform_f':   'Platform:',
+        'btn_delete':       'Delete',
+        'th_id':            '#',
+        'th_time':          'Time',
+        'th_model':         'Model',
+        'th_rom':           'ROM Name',
+        'th_window':        'Window',
+        'th_platform':      'Platform',
+        'lf_fix_platform':  'Fix Platform',
+        'lbl_fix_mode':     'Mode:',
+        'lbl_fix_cat':      'Category:',
+        'lbl_fix_plat':     'Platform:',
+        'btn_apply_plat':   'Apply to All Records of This Game',
+        'btn_overlay':      'Overlay ✓',
+        'btn_plain':        'Plain     ',
+        # ── Tab5 ──
+        'th_progress':      'Progress',
+        'lbl_curr_prog':    '[Current Progress]',
+        'lbl_curr_guide':   '[Guide Suggestions]',
+        # ── Tab3 quota table columns ──
+        'th_engine':        'Engine',
+        'th_used':          'Used',
+        'th_limit':         'Limit',
+        'quota_no_limit':   'No Quota',
+        'quota_no_free':    '⚠ No Free Quota',
+        'quota_switch':     'No free quota (limit=0), please switch model',
+        # ── Menu ──
+        'menu_file':        'File',
+        'menu_exit':        'Exit',
+        'menu_view':        'View',
+        'menu_switch_lang': 'Switch UI Language',
+        'menu_lang_zh':     '中文',
+        'menu_lang_en':     'English',
+        'menu_edit_platforms': 'Platform Editor',
+        'menu_help':        'Help',
+        'menu_tutorial':    'LangForge Tutorial',
+        'menu_platform_editor': 'Platform Editor',
+        'menu_about':       'About LangForge',
+        # ── Status ──
+        'status_reading':   'Loading image...',
+        'status_img_fail':  'Image load failed',
+        'status_capturing': 'Capturing screen...',
+        'status_no_win':    'Target window not found',
+        'status_guide_analyzing': 'Analyzing guide...',
+        'status_guide_done':'Guide analysis complete',
+        'status_trans_done':'Translation complete',
+        'status_no_key':    'Please enter API Key',
+        'status_quota_done':'All model quotas exhausted',
+        'status_key_needed':'Please enter {engine} API Key',
+        'status_keyboard_need': 'keyboard module required: pip install keyboard',
+        'status_hotkey_fail': 'Hotkey setup failed: {err}',
+        'status_guide_hotkey_fail': 'Guide hotkey setup failed: {err}',
+        'status_win_exists':'Window already exists: {name}',
+        'status_win_added': 'Added: {name}',
+        'status_win_notfound': 'Not found: {name}',
+        'status_win_removed': 'Removed: {name}',
+        'status_model_exists': 'Model already exists: {model}',
+        'status_model_added': 'Added: {model}',
+        'status_model_removed': 'Removed: {model}',
+        'status_builtin_no_remove': 'Built-in models cannot be removed',
+        'status_no_model_remove': 'No removable model found',
+        'status_default_saved': 'Default saved: {engine} / {model}',
+        'status_hotkey_on': 'Active: {key}',
+        'status_queue_full':    'Request queue full (max 10), please wait',
+        'status_queue_waiting': 'Queue waiting ({n} tasks)',
+        # ── OLLAMA ──
+        'lf_ollama':              '🦙 OLLAMA Local Engine',
+        'lbl_ollama_detected':    'Local OLLAMA detected. Installed models:',
+        'cb_use_ollama':          'Use OLLAMA (ignore cloud API Key)',
+        'lbl_ollama_timeout':     'Timeout(s):',
+        'cb_vision_filter':       'VLM (Vision-Language Model) only',
+        'lf_session':          'Session Recording',
+        'btn_start_session':   'Start Session',
+        'btn_stop_session':    'Stop Session',
+        'btn_open_playback':   'Open Playback',
+        'session_idle':        'Idle',
+        'session_recording':   'Recording...',
+        'th_session_game':  'Game',
+        'th_session_start':  'Started',
+        'th_session_frames': 'Frames',
+        'th_session_plat':   'Platform',
+        'btn_session_replay': '▶ Replay Session',
+        'btn_session_delete': 'Delete Session',
+        'session_no_select':  'Please select a session',
+        'btn_stop_playback':   '■ Stop Playback',
+        'status_ollama_timeout':  'OLLAMA timeout — increase Timeout or use a smaller model',
+        'status_ollama_fail':     'OLLAMA call failed: {err}',
+        'status_ollama_no_model': 'Please select an OLLAMA model',
+    },
+}
+
+def S(key: str) -> str:
+    return UI_STRINGS.get(CURRENT_LANG, UI_STRINGS['zh']).get(key, key)
+
+CURRENT_LANG = 'zh'  # 預設值；__init__ 讀取 config 後更新
+
+
+# ==========================================
+# 螢幕偵測
+# ==========================================
+def _get_monitors():
+    """回傳所有螢幕資訊 list[dict(index, x, y, w, h, label)]"""
+    try:
+        import ctypes
+        monitors = []
+        def _cb(hMonitor, hdcMonitor, lprcMonitor, dwData):
+            r = lprcMonitor.contents
+            monitors.append({'x': r.left, 'y': r.top,
+                             'w': r.right - r.left, 'h': r.bottom - r.top})
+            return 1
+        MONITORENUMPROC = ctypes.WINFUNCTYPE(
+            ctypes.c_bool, ctypes.c_ulong, ctypes.c_ulong,
+            ctypes.POINTER(ctypes.wintypes.RECT), ctypes.c_double)
+        ctypes.windll.user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(_cb), 0)
+        result = []
+        for i, m in enumerate(monitors):
+            label = f'Screen {i+1}  ({m["w"]}x{m["h"]})' if CURRENT_LANG == 'en' else f'螢幕 {i+1}  ({m["w"]}x{m["h"]})'
+            result.append({'index': i+1, 'label': label, **m})
+        return result if result else [{'index': 1, 'label': '螢幕 1', 'x': 0, 'y': 0,
+                                       'w': 1920, 'h': 1080}]
+    except Exception:
+        return [{'index': 1, 'label': 'Screen 1  (1920x1080)' if CURRENT_LANG=='en' else '螢幕 1  (1920x1080)', 'x': 0, 'y': 0, 'w': 1920, 'h': 1080}]
+
+
+# ==========================================
+# 配置與流量控制
+# ==========================================
+TARGET_DISPLAY_WIDTH        = 600   # 預設顯示寬度
+DISPLAY_WIDTH_LARGE         = 900   # 寬螢幕來源時使用
+WIDE_SOURCE_THRESHOLD       = 1800  # 原圖寬度超過此值則切換至 LARGE
+DISPLAY_INIT_HEIGHT         = 600
+PLAYBACK_DISPLAY_WIDTH      = 600   # 播放視窗預設寬度
+PLAYBACK_DISPLAY_WIDTH_LARGE= 900   # 播放視窗寬螢幕寬度
+PLAYBACK_FPS_MS             = 500   # 播放間隔 ms（2fps）
+PLAYBACK_DELAY_SECONDS      = 600   # 延遲播放秒數（10分鐘）
+SESSION_CAPTURE_INTERVAL_MS = 500   # 場次截圖間隔 ms
+SESSION_STABLE_COUNT        = 4     # 畫面穩定判定次數
+SESSION_STABLE_DIFF         = 10    # 畫面穩定差異門檻
+REQUEST_QUEUE_MAXSIZE = 10
+_request_queue = queue.Queue(maxsize=REQUEST_QUEUE_MAXSIZE)
+
+KEY_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'config',
+    'configs.json'
+)
+DEFAULT_HOTKEY = 'ctrl+f2'
+LAST_REQUEST_TIME = {}  # {model_name: timestamp} 各模型獨立計時
+COOLDOWN_SECONDS_DEFAULT = 13
+
+# ==========================================
+# API Key 混淆（XOR + base64，以機器 ID 為 salt）
+# ==========================================
+def _get_machine_salt() -> bytes:
+    """取得機器唯一識別碼作為 XOR salt（48 bytes）。
+    優先使用 Windows MachineGuid，fallback 至 MAC address。
+    """
+    salt_src = ''
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r'SOFTWARE\Microsoft\Cryptography')
+        salt_src, _ = winreg.QueryValueEx(key, 'MachineGuid')
+        winreg.CloseKey(key)
+    except Exception:
+        pass
+    if not salt_src:
+        try:
+            import uuid
+            salt_src = str(uuid.getnode())
+        except Exception:
+            salt_src = 'LangForge-fallback-salt-2026'
+    # 將 salt_src 重複延伸至 48 bytes
+    raw = salt_src.encode('utf-8')
+    return (raw * (48 // len(raw) + 1))[:48]
+
+_OBFUSCATED_PREFIX = 'LF1:'   # 版本旗標，區分混淆值與舊版明文
+
+def obfuscate_key(plaintext: str) -> str:
+    """明文 API Key → XOR 混淆後 base64 字串（含版本前綴），存入 configs.json。"""
+    if not plaintext:
+        return ''
+    import base64
+    salt = _get_machine_salt()
+    data = plaintext.encode('utf-8')
+    xored = bytes(b ^ salt[i % len(salt)] for i, b in enumerate(data))
+    return _OBFUSCATED_PREFIX + base64.b64encode(xored).decode('ascii')
+
+def deobfuscate_key(encoded: str) -> str:
+    """configs.json 讀出的值 → 還原明文 API Key。
+    有 LF1: 前綴 → 新版混淆值，解碼還原。
+    無前綴 → 舊版明文，直接回傳（向下相容）。
+    """
+    if not encoded:
+        return ''
+    if not encoded.startswith(_OBFUSCATED_PREFIX):
+        return encoded   # 舊版明文，直接使用
+    import base64
+    try:
+        xored = base64.b64decode(encoded[len(_OBFUSCATED_PREFIX):])
+        salt = _get_machine_salt()
+        plain = bytes(b ^ salt[i % len(salt)] for i, b in enumerate(xored))
+        return plain.decode('utf-8')
+    except Exception:
+        return encoded   # 解碼異常，fallback 原值
+STABLE_CHECK_INTERVAL_MS = 500   # 每次截圖間隔
+STABLE_COUNT_DEFAULT      = 4    # 連續穩定次數門檻（4×500ms=2秒）
+STABLE_DIFF_DEFAULT       = 10   # 像素差異平均值門檻（0~255）
+
+# ══════════════════════════════════════════
+# 語言 → 字體對應（依目標語言選擇合適字體）
+# ══════════════════════════════════════════
+# Windows 內建字體優先，依語言降序 fallback
+LANG_FONT_CANDIDATES = {
+    'Korean':   ['malgun.ttf', 'malgunbd.ttf', 'gulim.ttc', 'batang.ttc', 'msjh.ttc'],
+    'Japanese': ['meiryo.ttc', 'yumin.ttf', 'msgothic.ttc', 'msjh.ttc'],
+    'Russian':  ['arial.ttf', 'times.ttf', 'msjh.ttc'],
+    'French':   ['arial.ttf', 'msjh.ttc'],
+    'German':   ['arial.ttf', 'msjh.ttc'],
+    'Spanish':  ['arial.ttf', 'msjh.ttc'],
+    'Italian':  ['arial.ttf', 'msjh.ttc'],
+    'Portuguese': ['arial.ttf', 'msjh.ttc'],
+    'default':  ['msjh.ttc', 'msyh.ttc', 'arial.ttf'],
+}
+
+def _get_font_for_lang(tgt_lang: str, size: int):
+    """依目標語言嘗試載入最合適的字體，失敗則 fallback"""
+    import os
+    # 從 tgt_lang 字串抽取語言關鍵字（去掉括號部分）
+    lang_key = tgt_lang.split('(')[0].strip()
+    # 找對應候選清單
+    candidates = None
+    for k in LANG_FONT_CANDIDATES:
+        if k.lower() in lang_key.lower():
+            candidates = LANG_FONT_CANDIDATES[k]
+            break
+    if candidates is None:
+        candidates = LANG_FONT_CANDIDATES['default']
+
+    win_fonts = 'C:/Windows/Fonts'
+    for fname in candidates:
+        fpath = os.path.join(win_fonts, fname)
+        try:
+            return ImageFont.truetype(fpath, size)
+        except Exception:
+            pass
+    # 最終 fallback
+    return ImageFont.load_default()
+
+# ══════════════════════════════════════════
+# 語言選項
+# ══════════════════════════════════════════
+GAME_LANGUAGES = [
+    'All Foreign Text On The Screen(畫面上所有外文)',
+    'Traditional Chinese(正體中文)',
+    'Japanese(日文)',
+    'English(英文)',
+    'Simplified Chinese(簡體中文)',
+    'Korean(韓文)',
+    'French(法文)',
+    'German(德文)',
+    'Spanish(西班牙文)',
+    'Italian(義大利文)',
+    'Portuguese(葡萄牙文)',
+    'Russian(俄文)',
+]
+
+TARGET_LANGUAGES = [
+    'Traditional Chinese(正體中文)',
+    'Simplified Chinese(簡體中文)',
+    'English(英文)',
+    'Japanese(日文)',
+    'Korean(韓文)',
+    'French(法文)',
+    'German(德文)',
+    'Spanish(西班牙文)',
+    'Italian(義大利文)',
+    'Portuguese(葡萄牙文)',
+    'Russian(俄文)',
+]
+
+# ══════════════════════════════════════════
+# 每個模型的每日限額（RPD）— 依 Google AI Studio 後台實際數據
+# ══════════════════════════════════════════
+MODEL_DAILY_LIMITS = {
+    # ── Gemini 免費版（依後台 Rate Limits，2025/05 實測） ──
+    'gemini-2.5-flash':               20,   # RPM=5
+    'gemini-2.5-flash-lite':          20,   # RPM=10
+    'gemini-3-flash-preview':         20,   # RPM=5
+    'gemini-3.1-flash-lite-preview':  500,  # RPM=15
+    'gemini-2.5-pro':                  0,
+    'gemini-3-pro':                    0,
+    'gemini-3.1-pro':                  0,
+    # ── Groq 免費版 ──
+    'meta-llama/llama-4-scout-17b-16e-instruct':     1000,  # RPM=30
+    'meta-llama/llama-4-maverick-17b-128e-instruct':     0,  # 需付費帳號才可存取
+    # ── Mistral 免費版 ──
+    'pixtral-12b-2409':          500,
+    'mistral-small-latest':      500,
+    'pixtral-large-latest':      200,
+    # ── OpenAI（付費） ──
+    'gpt-4.1-mini':              500,
+    'gpt-4.1':                   500,
+    'gpt-4o':                    500,
+    # ── Claude（付費） ──
+    'claude-sonnet-4-5-20250929': 500,
+    'claude-haiku-4-5-20251001':  500,
+    'claude-opus-4-6':            500,
+}
+
+# 各模型 RPM（用於冷卻計算；未列的使用預設）
+MODEL_RPM = {
+    'gemini-2.5-flash':               5,
+    'gemini-2.5-flash-lite':         10,
+    'gemini-3-flash-preview':         5,
+    'gemini-3.1-flash-lite-preview': 15,
+    'meta-llama/llama-4-scout-17b-16e-instruct':     30,
+    'meta-llama/llama-4-maverick-17b-128e-instruct':  30,
+    'pixtral-12b-2409':       30,
+    'mistral-small-latest':   30,
+    'pixtral-large-latest':   10,
+}
+
+# ══════════════════════════════════════════
+# 引擎定義（順序：Gemini → Groq → Mistral → OpenAI → Claude）
+# ══════════════════════════════════════════
+ENGINE_ORDER = ['gemini', 'groq', 'mistral', 'openai', 'claude']
+ENGINE_DISPLAY = {
+    'gemini':  'Gemini',
+    'groq':    'Groq',
+    'mistral': 'Mistral',
+    'openai':  'OpenAI',
+    'claude':  'Claude',
+}
+
+ENGINE_MODELS = {
+    'gemini': [
+        'gemini-2.5-flash',
+        'gemini-2.5-flash-lite',
+        'gemini-3-flash-preview',
+        'gemini-3.1-flash-lite-preview',  # RPD=500, RPM=15
+    ],
+    'groq': [
+        'meta-llama/llama-4-scout-17b-16e-instruct',      # 推薦：1000 RPD
+        'meta-llama/llama-4-maverick-17b-128e-instruct',   # 更強多語
+    ],
+    'mistral': [
+        'pixtral-12b-2409',         # 視覺專用
+        'mistral-small-latest',     # 小型通用（支援 vision）
+        'pixtral-large-latest',     # 大型視覺
+    ],
+    'openai': [
+        'gpt-4.1-mini',
+        'gpt-4.1',
+        'gpt-4o',
+    ],
+    'claude': [
+        'claude-sonnet-4-5-20250929',
+        'claude-haiku-4-5-20251001',
+        'claude-opus-4-6',
+    ],
+}
+
+ENGINE_DEFAULT_MODEL = {
+    'gemini':  'gemini-2.5-flash',
+    'groq':    'meta-llama/llama-4-scout-17b-16e-instruct',
+    'mistral': 'pixtral-12b-2409',
+    'openai':  'gpt-4.1-mini',
+    'claude':  'claude-sonnet-4-5-20250929',
+}
+
+ALL_MODELS = []
+for models in ENGINE_MODELS.values():
+    ALL_MODELS.extend(models)
+
+def log(msg):
+    print(f"[{time.strftime('%H:%M:%S')}] {msg}")
+
+# ==========================================
+# JSON 配置管理（按模型追蹤配額）
+# ==========================================
+def _get_pacific_date():
+    """取得太平洋時間的日期字串（配額重置基準）"""
+    from datetime import datetime, timezone, timedelta
+    utc_now = datetime.now(timezone.utc)
+    # 判斷是否為日光節約時間（3月第2週日～11月第1週日）
+    year = utc_now.year
+    # 3月第2個週日
+    mar1 = datetime(year, 3, 1, tzinfo=timezone.utc)
+    dst_start = mar1 + timedelta(days=(6 - mar1.weekday()) % 7 + 7)  # 第2個週日
+    dst_start = dst_start.replace(hour=10)  # UTC 10:00 = PST 02:00
+    # 11月第1個週日
+    nov1 = datetime(year, 11, 1, tzinfo=timezone.utc)
+    dst_end = nov1 + timedelta(days=(6 - nov1.weekday()) % 7)  # 第1個週日
+    dst_end = dst_end.replace(hour=9)  # UTC 09:00 = PDT 02:00
+    if dst_start <= utc_now < dst_end:
+        offset = timedelta(hours=-7)  # PDT
+    else:
+        offset = timedelta(hours=-8)  # PST
+    pacific_now = utc_now + offset
+    return pacific_now.strftime('%Y-%m-%d')
+
+def _default_used_today():
+    return {m: 0 for m in ALL_MODELS}
+
+def _detect_ui_lang() -> str:
+    """偵測系統語系，中文系統回傳 'zh'，其餘回傳 'en'。"""
+    try:
+        import locale
+        lang = locale.getlocale()[0] or ''
+        if not lang:
+            lang = locale.setlocale(locale.LC_ALL, '')
+    except Exception:
+        lang = ''
+    return 'zh' if lang.lower().startswith('zh') else 'en'
+
+def load_config():
+    today = _get_pacific_date()
+    default = {eng: '' for eng in ENGINE_ORDER}
+    default.update({'used_today': _default_used_today(), 'date': today})
+    default['hotkey'] = DEFAULT_HOTKEY
+    default['ui_lang'] = _detect_ui_lang()  # 依系統語系自動決定預設介面語言
+
+    if not os.path.exists(KEY_FILE):
+        return default
+    try:
+        with open(KEY_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        if data.get('date') != today:
+            data['date'] = today
+            data['used_today'] = _default_used_today()
+
+        used = data.get('used_today')
+        if isinstance(used, int):
+            new_used = _default_used_today()
+            new_used['gemini-2.5-flash'] = used
+            data['used_today'] = new_used
+        elif isinstance(used, dict):
+            # 舊版 engine-level → 遷移
+            old_engines = ['gemini', 'openai', 'claude']
+            if any(k in used for k in old_engines) and not any(k in used for k in ALL_MODELS):
+                new_used = _default_used_today()
+                for eng in old_engines:
+                    if eng in used:
+                        dm = ENGINE_DEFAULT_MODEL.get(eng, '')
+                        if dm:
+                            new_used[dm] = used[eng]
+                data['used_today'] = new_used
+            else:
+                for m in ALL_MODELS:
+                    data['used_today'].setdefault(m, 0)
+        else:
+            data['used_today'] = _default_used_today()
+
+        for provider in ENGINE_ORDER:
+            data.setdefault(provider, '')
+            if data[provider]:
+                raw = data[provider]
+                data[provider] = deobfuscate_key(raw)
+                encrypted = raw.startswith(_OBFUSCATED_PREFIX)
+        data.setdefault('hotkey', DEFAULT_HOTKEY)
+        data.setdefault('ui_lang', _detect_ui_lang())
+        data['auto_trans'] = False  # 自動翻譯不記憶，每次啟動固定關閉
+        return data
+    except Exception as e:
+        log(f"載入配置失敗: {e}")
+        return default
+
+def save_config(data):
+    try:
+        data['date'] = _get_pacific_date()
+        # 儲存前將 API Key 混淆，避免明文寫入 configs.json
+        save_data = dict(data)
+        for provider in ENGINE_ORDER:
+            if save_data.get(provider):
+                save_data[provider] = obfuscate_key(save_data[provider])
+        with open(KEY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(save_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log(f"儲存配置失敗: {e}")
+
+# ==========================================
+# 翻譯 Prompt（五引擎共用，動態語言帶入）
+# ==========================================
+def build_translate_prompt(src_lang: str, tgt_lang: str) -> str:
+    if src_lang.startswith('All Foreign Text'):
+        src_desc = '所有非母語的外文文字（無論何種語言）'
+        no_text_cond = '沒有需要翻譯的外文'
+    else:
+        src_desc = f'{src_lang} 文字'
+        no_text_cond = f'沒有 {src_lang} 文字'
+    return (
+        f"你是遊戲翻譯專家。請辨識這張遊戲截圖中所有的 {src_desc}，"
+        f"並將每一段翻譯成 {tgt_lang}。"
+        f"注意：'tw' 欄位必須填入 {tgt_lang} 的翻譯結果，絕對不要填入原文。\n"
+        "回傳格式為純 JSON 列表（不要包含 markdown 標記），每個元素包含：\n"
+        f"- 'tw': 翻譯結果（{tgt_lang}，不是原文）\n"
+        "- 'x': 文字區塊左上角的水平位置（必須是 0.0~1.0 之間的小數比例值，絕對不可以是像素數值）\n"
+        "- 'y': 文字區塊左上角的垂直位置（必須是 0.0~1.0 之間的小數比例值，絕對不可以是像素數值）\n"
+        "- 'w': 文字區塊的寬度（必須是 0.0~1.0 之間的小數比例值）\n"
+        "- 'h': 文字區塊的高度（必須是 0.0~1.0 之間的小數比例值）\n"
+        "重要：x/y/w/h 全部必須是 0.0~1.0 的浮點數，例如畫面下方 75% 處寫 0.75，不可寫 480 這類像素值。\n"
+        "每個視覺上獨立的文字框必須單獨回傳為一個 segment，不同位置的文字不可合併。"
+        "即使多個文字框內容相關（如角色名稱列表），只要位置不同就各自獨立回傳，x/y 準確對應各自的位置。\n"
+        '範例: [{"tw": "翻譯文字", "x": 0.05, "y": 0.75, "w": 0.4, "h": 0.08}]\n'
+        f"如果{no_text_cond}，回傳空列表 []。只回傳 JSON，不要有其他文字。"
+    )
+
+
+def build_guide_prompt(rom_name: str, region: str, tgt_lang: str) -> str:
+    return (
+        f"你是資深遊戲攻略專家。這是一張來自『{rom_name}』（{region}版本）的遊戲截圖。\n"
+        f"請根據截圖中的畫面，以 {tgt_lang} 回覆以下兩段資訊：\n\n"
+        "1.【目前進度】用一句話描述玩家目前所在位置與劇情進度。\n"
+        "2.【目前攻略內容】列出 3~5 條具體的攻略建議，包含：\n"
+        "   - 必拿道具或必做事項\n"
+        "   - 首要任務與方向指引\n"
+        "   - 隱藏要素或補給提示\n"
+        "   - 下一個目標地點\n\n"
+        "回傳格式為純 JSON（不要包含 markdown 標記）：\n"
+        '{{"progress": "目前進度描述", "guide": ["攻略建議1", "攻略建議2", "攻略建議3"]}}\n'
+        "只回傳 JSON，不要有其他文字。"
+    )
+
+
+def build_combined_prompt(rom_name: str, region: str, src_lang: str, tgt_lang: str) -> str:
+    if src_lang.startswith('All Foreign Text'):
+        src_desc = '所有外文文字'
+        no_text_cond = '沒有需要翻譯的外文'
+    else:
+        src_desc = f'{src_lang} 文字'
+        no_text_cond = f'沒有 {src_lang} 文字'
+    return (
+        f"你是遊戲翻譯與攻略專家。這是一張來自『{rom_name}』（{region}版本）的遊戲截圖。\n"
+        "請同時完成以下兩件任務，並以單一 JSON 回傳（不要包含 markdown 標記）：\n\n"
+        f"任務一【翻譯】辨識截圖中所有 {src_desc}，翻譯成 {tgt_lang}。\n"
+        f"任務二【攻略】根據畫面分析目前進度並給出 {tgt_lang} 攻略建議。\n\n"
+        "回傳格式：\n"
+        '{{"translations": [{{"tw": "翻譯文字", "x": 0.05, "y": 0.75, "w": 0.4, "h": 0.08}}], '
+        '"progress": "目前進度描述", '
+        '"guide": ["攻略建議1", "攻略建議2", "攻略建議3"]}}\n'
+        "注意：\n"
+        f"- 'tw' 欄位必須填入 {tgt_lang} 的翻譯結果，絕對不要填入原文\n"
+        "- x/y/w/h 必須是 0.0~1.0 的浮點數比例值，絕對不可以是像素數值（例如畫面下方 75% 處寫 0.75，不可寫 480）\n"
+        "- guide 列出 3~5 條具體攻略建議\n"
+        f"- 如果{no_text_cond}，translations 為空列表\n"
+        "只回傳 JSON，不要有其他文字。"
+    )
+
+
+# 預設 prompt（執行期由 app 的語言設定動態產生）
+TRANSLATE_PROMPT = build_translate_prompt('Japanese(日文)', 'Traditional Chinese(正體中文)')
+GUIDE_PROMPT_TEMPLATE = None    # 已由 build_guide_prompt() 取代
+COMBINED_PROMPT_TEMPLATE = None  # 已由 build_combined_prompt() 取代
+
+# ==========================================
+# 五引擎 API 呼叫
+# ==========================================
+def _img_to_jpeg_b64(image_pil):
+    buf = io.BytesIO()
+    image_pil.save(buf, format='JPEG', quality=90)
+    return base64.b64encode(buf.getvalue()).decode('utf-8')
+
+def _img_to_jpeg_bytes(image_pil):
+    buf = io.BytesIO()
+    image_pil.save(buf, format='JPEG', quality=90)
+    return buf.getvalue()
+
+def _parse_json_response(text):
+    """清理 markdown 包裝並解析 JSON。失敗時嘗試自動修復常見錯誤。"""
+    cleaned = re.sub(r'```json\s*|```', '', text).strip()
+
+    # 第一次嘗試：直接解析
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # ── 自動修復常見格式錯誤 ──
+    fixed = cleaned
+
+    # 1) 數值後面多餘引號: 0.092" → 0.092
+    fixed = re.sub(r'(\d+\.\d+)"(\s*[},\]])', r'\1\2', fixed)
+
+    # 2) 數值被錯誤包成字串: "0.5" → 0.5（在 x/y/w/h 欄位）
+    fixed = re.sub(r'"(\d+\.\d+)"(\s*[},\]])', r'\1\2', fixed)
+
+    # 3) 尾巴多餘逗號: [... , ] → [... ]
+    fixed = re.sub(r',\s*([}\]])', r'\1', fixed)
+
+    # 4) 缺少逗號在 }{ 之間: }{ → },{
+    fixed = re.sub(r'}\s*{', '},{', fixed)
+
+    # 5) 單引號替換成雙引號
+    if "'" in fixed and '"' not in fixed:
+        fixed = fixed.replace("'", '"')
+
+    # 5.5) 中文括號引號 「」 被當作字串引號，漏掉 JSON 雙引號
+    #      」, " → 」", "  以及  ", 「 → ", "「
+    fixed = re.sub(r'」\s*,\s*"', '」", "', fixed)
+    fixed = re.sub(r'」\s*}', '」"}', fixed)
+    fixed = re.sub(r'」\s*\]', '」"]', fixed)
+
+    # 6) 擷取最外層 JSON（物件 {} 或陣列 []，去掉前後多餘文字）
+    # 先嘗試修復尾部多餘的 ] 或 }（常見於 LLM 輸出的 {...}] 或 [...}）
+    for _ in range(3):
+        fixed_try = re.sub(r'(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})\s*[\]\}]+$',
+                           lambda m: m.group(1), fixed)
+        if fixed_try != fixed:
+            fixed = fixed_try
+            try:
+                result = json.loads(fixed)
+                log('JSON 自動修復成功（移除尾部多餘括號）')
+                return result
+            except json.JSONDecodeError:
+                pass
+            break
+
+    m_obj = re.search(r'\{.*\}', fixed, re.DOTALL)
+    m_arr = re.search(r'\[.*\]', fixed, re.DOTALL)
+    # 優先取較早出現且較長的匹配
+    candidates = []
+    if m_obj:
+        candidates.append(m_obj.group(0))
+    if m_arr:
+        candidates.append(m_arr.group(0))
+    for candidate in sorted(candidates, key=len, reverse=True):
+        try:
+            result = json.loads(candidate)
+            log('JSON 自動修復成功')
+            return result
+        except json.JSONDecodeError:
+            continue
+
+
+    # 所有修復都失敗，拋出原始錯誤
+    raise ValueError(f"JSON_PARSE_FAIL|json.JSONDecodeError|{text}")
+
+
+
+def call_gemini(api_key, model, image_pil, prompt):
+    """Gemini API (google-genai SDK)"""
+    from google import genai
+    from google.genai import types
+    client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
+    img_bytes = _img_to_jpeg_bytes(image_pil)
+    response = client.models.generate_content(
+        model=model,
+        contents=[
+            prompt,
+            types.Part.from_bytes(data=img_bytes, mime_type='image/jpeg'),
+        ]
+    )
+    return _parse_json_response(response.text)
+
+
+def call_groq(api_key, model, image_pil, prompt):
+    """Groq API (groq SDK — OpenAI 相容 chat.completions + vision)"""
+    from groq import Groq
+    client = Groq(api_key=api_key)
+    img_b64 = _img_to_jpeg_b64(image_pil)
+    chat_completion = client.chat.completions.create(
+        model=model,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{img_b64}",
+                    },
+                },
+            ],
+        }],
+        max_completion_tokens=2048,
+    )
+    return _parse_json_response(chat_completion.choices[0].message.content)
+
+
+def call_mistral(api_key, model, image_pil, prompt):
+    """Mistral API (mistralai SDK — chat.complete + vision)"""
+    from mistralai import Mistral
+    client = Mistral(api_key=api_key)
+    img_b64 = _img_to_jpeg_b64(image_pil)
+    chat_response = client.chat.complete(
+        model=model,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": f"data:image/jpeg;base64,{img_b64}",
+                },
+            ],
+        }],
+        max_tokens=2048,
+    )
+    return _parse_json_response(chat_response.choices[0].message.content)
+
+
+def call_openai(api_key, model, image_pil, prompt):
+    """OpenAI Responses API (openai SDK)"""
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key)
+    img_b64 = _img_to_jpeg_b64(image_pil)
+    response = client.responses.create(
+        model=model,
+        input=[{
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": prompt},
+                {"type": "input_image", "image_url": f"data:image/jpeg;base64,{img_b64}"},
+            ],
+        }],
+    )
+    return _parse_json_response(response.output_text)
+
+
+def call_claude(api_key, model, image_pil, prompt):
+    """Claude Messages API (anthropic SDK)"""
+    import anthropic
+    client = anthropic.Anthropic(api_key=api_key)
+    img_b64 = _img_to_jpeg_b64(image_pil)
+    message = client.messages.create(
+        model=model,
+        max_tokens=2048,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": img_b64}},
+                {"type": "text", "text": prompt},
+            ],
+        }],
+    )
+    return _parse_json_response(message.content[0].text)
+
+
+ENGINE_CALLERS = {
+    'gemini':  call_gemini,
+    'groq':    call_groq,
+    'mistral': call_mistral,
+    'openai':  call_openai,
+    'claude':  call_claude,
+}
+
+# ==========================================
+# OLLAMA 本地引擎
+# ==========================================
+OLLAMA_BASE_URL  = 'http://localhost:11434'
+
+GOOGLE_TRANSLATE_URL = 'https://translate.googleapis.com/translate_a/single'
+
+def _google_translate(text: str, src_lang: str, tgt_lang: str) -> str:
+    """使用 Google 非官方輕量端點翻譯單段文字。失敗時回傳原文。"""
+    import urllib.request, urllib.parse
+    try:
+        params = urllib.parse.urlencode({
+            'client': 'gtx',
+            'sl':     src_lang,
+            'tl':     tgt_lang,
+            'dt':     't',
+            'q':      text,
+        })
+        url = f'{GOOGLE_TRANSLATE_URL}?{params}'
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        translated = ''.join(part[0] for part in data[0] if part[0])
+        return translated.strip() if translated else text
+    except Exception:
+        return text
+
+LANG_TO_BCP47 = {
+    'All Foreign Text On The Screen(畫面上所有外文)': 'auto',
+    'Traditional Chinese(正體中文)':  'zh-TW',
+    'Japanese(日文)':                 'ja',
+    'English(英文)':                  'en',
+    'Simplified Chinese(簡體中文)':   'zh-CN',
+    'Korean(韓文)':                   'ko',
+    'French(法文)':                   'fr',
+    'German(德文)':                   'de',
+    'Spanish(西班牙文)':              'es',
+    'Italian(義大利文)':              'it',
+    'Portuguese(葡萄牙文)':           'pt',
+    'Russian(俄文)':                  'ru',
+}
+
+OLLAMA_TIMEOUT   = 60   # 預設推理 timeout（秒）；使用者可在 UI 調整
+
+def _detect_ollama_vision_models() -> list:
+    """偵測本地 OLLAMA 所有已安裝的模型，失敗時靜默回傳空列表。"""
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            f'{OLLAMA_BASE_URL}/api/tags', method='GET')
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+        models = [m['name'] for m in data.get('models', [])]
+        log(f'[OLLAMA] 找到 {len(models)} 個已安裝模型')
+        return models
+    except Exception:
+        return []
+
+# 已知具備視覺能力的模型名稱關鍵字（小寫比對）
+OLLAMA_VISION_KEYWORDS = [
+    # LLaVA 系列
+    'llava',
+    'bakllava',
+    # Meta vision
+    'llama3.2-vision',
+    # Qwen vision
+    'qwen2.5-vl',
+    'qwen2.5vl',       # 部分標籤可能省略 dash
+    # 翻譯+視覺
+    'translategemma',
+]
+
+def _filter_vision_models(all_models: list) -> list:
+    """從完整模型清單中篩選出具視覺能力的模型。"""
+    result = []
+    for m in all_models:
+        name_lower = m.lower()
+        if any(kw in name_lower for kw in OLLAMA_VISION_KEYWORDS):
+            result.append(m)
+    return result if result else all_models  # 沒有符合時回傳全部，避免清單變空
+
+def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOUT):
+    """OLLAMA 原生 /api/chat 視覺呼叫。
+    以獨立執行緒發送請求，主執行緒等待 timeout 秒；逾時則拋出 TimeoutError。
+    """
+    import urllib.request
+    import threading
+
+    img_b64 = _img_to_jpeg_b64(image_pil)
+    payload = {
+        "model": model,
+        "messages": [{
+            "role": "user",
+            "content": prompt,
+            "images": [img_b64]
+        }],
+        "stream": False,
+        "options": {"num_predict": 2048}
+    }
+    body = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(
+        f'{OLLAMA_BASE_URL}/api/chat',
+        data=body,
+        headers={'Content-Type': 'application/json'},
+        method='POST'
+    )
+
+    result_holder = [None]   # [response_text | Exception]
+    done_evt = threading.Event()
+
+    def _worker():
+        try:
+            # 連線與讀取都在子執行緒進行，本身不設 socket timeout
+            with urllib.request.urlopen(req, timeout=timeout + 5) as resp:
+                raw = resp.read().decode('utf-8')
+            result_holder[0] = raw
+        except Exception as exc:
+            result_holder[0] = exc
+        finally:
+            done_evt.set()
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    finished = done_evt.wait(timeout=timeout)
+
+    if not finished:
+        # 逾時：daemon thread 會自然結束，這裡直接拋例外
+        raise TimeoutError(
+            f'OLLAMA 推理逾時（>{timeout}s），模型 {model} 回應過慢，'
+            f'請縮短 Timeout 秒數或換較小的模型。'
+        )
+
+    outcome = result_holder[0]
+    if isinstance(outcome, Exception):
+        raise outcome
+
+    result = json.loads(outcome)
+    text = result.get('message', {}).get('content', '')
+    return _parse_json_response(text)
+
+# ==========================================
+# Segment 預處理：合併相近區塊（防疊字輔助）
+# ==========================================
+def _merge_segments(segments: list,
+                    x_thresh: float = 0.08,
+                    y_thresh: float = 0.12) -> list:
+    """將 x 座標相近（差距 < x_thresh）且 y 座標鄰近（差距 < y_thresh）
+    的 segment 合併為一個，譯文以空格串接。
+    步驟：
+    1. 依 x 分群（DBSCAN 概念的簡化版：單維度貪婪合併）
+    2. 同群內依 y 排序，相鄰 y 差距 < y_thresh 的視為同組
+    3. 同組 segment 合併：tw 以換行連接，x/y 取最小值，w/h 取涵蓋範圍
+    """
+    if not segments:
+        return segments
+
+    # 先依 x 排序
+    segs = sorted(segments, key=lambda s: float(s.get('x', 0)))
+
+    # x 分群
+    x_groups = []
+    current_group = [segs[0]]
+    for s in segs[1:]:
+        group_anchor_x = float(current_group[0].get('x', 0))
+        if abs(float(s.get('x', 0)) - group_anchor_x) <= x_thresh:
+            current_group.append(s)
+        else:
+            x_groups.append(current_group)
+            current_group = [s]
+    x_groups.append(current_group)
+
+    result = []
+    for group in x_groups:
+        # 群內依 y 排序
+        group_sorted = sorted(group, key=lambda s: float(s.get('y', 0)))
+        # y 分組（相鄰差距 < y_thresh 合併）
+        y_groups = [[group_sorted[0]]]
+        for s in group_sorted[1:]:
+            last_y = float(y_groups[-1][-1].get('y', 0))
+            if float(s.get('y', 0)) - last_y <= y_thresh:
+                y_groups[-1].append(s)
+            else:
+                y_groups.append([s])
+        # 各 y 組合併
+        for yg in y_groups:
+            if len(yg) == 1:
+                result.append(yg[0])
+            else:
+                xs = [float(s.get('x', 0)) for s in yg]
+                ys = [float(s.get('y', 0)) for s in yg]
+                ws = [float(s.get('w', 0.1)) for s in yg]
+                hs = [float(s.get('h', 0.05)) for s in yg]
+                x0 = min(xs)
+                y0 = min(ys)
+                x1 = max(xi + wi for xi, wi in zip(xs, ws))
+                y1 = max(yi + hi for yi, hi in zip(ys, hs))
+                merged_tw = '\n'.join(
+                    s.get('tw', '').strip() for s in yg if s.get('tw', '').strip()
+                )
+                result.append({
+                    'tw': merged_tw,
+                    'x': round(x0, 4),
+                    'y': round(y0, 4),
+                    'w': round(x1 - x0, 4),
+                    'h': round(y1 - y0, 4),
+                })
+    return result
+
+
+# ==========================================
+# 渲染引擎（安全邊距 + 自動換行 + 防疊字）
+# ==========================================
+PADDING = 15  # 畫布四周安全邊距 (px)
+
+
+def draw_wrapped_text_safe(draw, text, x, y, font, canvas_w, canvas_h, fill):
+    """
+    在 (x, y) 繪製自動換行文字，保證：
+    - 左右上下都留 PADDING 邊距
+    - 自動換行不超出右邊界
+    - 超出下邊界的行直接截斷不畫
+    回傳：實際佔用的底部 y 座標（供防疊字用）
+    """
+    # 清除換行符號（API 可能回傳多行文字導致 textlength 報錯）
+    text = text.replace('\n', ' ').replace('\r', '')
+
+    # 強制座標在安全區域內
+    x = max(x, PADDING)
+    y = max(y, PADDING)
+
+    # 可用寬度 = 畫布寬 - 左邊位置 - 右邊距
+    max_width = canvas_w - x - PADDING
+    if max_width < 30:
+        # 太靠右放不下，移到左邊距重新計算
+        x = PADDING
+        max_width = canvas_w - PADDING * 2
+
+    # 底部安全邊界
+    y_limit = canvas_h - PADDING
+
+    # 斷行
+    lines = []
+    current_line = ""
+    for char in text:
+        test_line = current_line + char
+        if draw.textlength(test_line, font=font) <= max_width:
+            current_line = test_line
+        else:
+            if current_line:
+                lines.append(current_line)
+            current_line = char
+    if current_line:
+        lines.append(current_line)
+
+    # 逐行繪製
+    line_height = font.size + 4
+    current_y = y
+    for line in lines:
+        if current_y + line_height > y_limit:
+            break  # 超出底部安全邊界，停止繪製
+        draw.text((x, current_y), line, fill=fill, font=font, anchor='la')
+        current_y += line_height
+
+    return current_y  # 回傳佔用到的底部 y
+
+# ==========================================
+# UI
+# ==========================================
+
+
+def _calc_dir_size_kb(dirpath: str) -> int:
+    """計算目錄內所有檔案的總大小（KB）。"""
+    total = 0
+    try:
+        for root, dirs, files in os.walk(dirpath):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, f))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return max(1, total // 1024)
+
+class _Tooltip:
+    """簡易 Tooltip：滑鼠停留時顯示提示文字。"""
+    def __init__(self, widget, text: str):
+        self._widget = widget
+        self._text   = text
+        self._win    = None
+        widget.bind('<Enter>', self._show)
+        widget.bind('<Leave>', self._hide)
+        widget.bind('<ButtonPress>', self._hide)
+
+    def _show(self, event=None):
+        if self._win:
+            return
+        x = self._widget.winfo_rootx() + 20
+        y = self._widget.winfo_rooty() + self._widget.winfo_height() + 4
+        self._win = tw = tk.Toplevel()
+        tw.wm_overrideredirect(True)
+        tw.wm_attributes('-topmost', True)
+        tw.wm_geometry(f'+{x}+{y}')
+        tk.Label(tw, text=self._text, justify='left',
+                 background='#ffffcc', relief='solid', borderwidth=1,
+                 font=('Arial', 8)).pack()
+
+    def _hide(self, event=None):
+        if self._win:
+            self._win.destroy()
+            self._win = None
+
+class LangForgeApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title('LangForge  V1.0.1-beta.5')
+        _load_app_icon(self.root)
+
+        self.config = load_config()
+        self._init_db()
+        self.last_res = []
+
+        # 視窗位置快取（需在 _find_mesen_window 第一次呼叫前初始化）
+        self._mesen_cache_rect  = None
+        self._mesen_cache_title = ''
+        self._mesen_cache_ts    = 0.0
+        self._last_disp_geom    = ''
+        self._last_guide_geom   = ''
+        self._reposition_after_id = None  # Configure debounce timer
+        self._position_polling_paused = False  # 自動翻譯開啟時暫停 polling
+        self._save_config_after_id = None  # trace_add debounce timer
+
+        # OLLAMA 本地引擎偵測（非同步，不阻塞啟動）
+        self._ollama_models = _detect_ollama_vision_models()
+        self._ollama_available = len(self._ollama_models) > 0
+
+        # 套用介面語系
+        global CURRENT_LANG
+        CURRENT_LANG = self.config.get('ui_lang', 'zh')
+
+        # 套用已儲存的螢幕位置
+        self._monitors = _get_monitors()
+        saved_screen = self.config.get('main_screen', 1)
+        _mon = next((m for m in self._monitors if m['index'] == saved_screen),
+                    self._monitors[0])
+        main_w, main_h = 580, 750
+        # 固定啟動位置 10,10，不記憶上次位置
+        self.root.geometry(f'{main_w}x{main_h}+10+10')
+        self.root.deiconify()  # 設好位置後才顯示
+
+        # ═══════════════════════════════════
+        # 選單列
+        # ═══════════════════════════════════
+        import webbrowser
+        menubar = tk.Menu(self.root)
+
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label=S('menu_edit_platforms'),
+                              command=self._open_platform_editor)
+        file_menu.add_separator()
+        file_menu.add_command(label=S('menu_exit'), command=self.root.destroy)
+        menubar.add_cascade(label=S('menu_file'), menu=file_menu)
+
+        view_menu = tk.Menu(menubar, tearoff=0)
+        lang_menu = tk.Menu(view_menu, tearoff=0)
+        lang_menu.add_command(label=S('menu_lang_zh'), command=lambda: self._switch_lang('zh'))
+        lang_menu.add_command(label=S('menu_lang_en'), command=lambda: self._switch_lang('en'))
+        view_menu.add_cascade(label=S('menu_switch_lang'), menu=lang_menu)
+        menubar.add_cascade(label=S('menu_view'), menu=view_menu)
+
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label=S('menu_tutorial'),
+                              command=lambda: webbrowser.open(TUTORIAL_URL))
+        help_menu.add_command(label=S('menu_about'),
+                              command=self._show_about)
+        menubar.add_cascade(label=S('menu_help'), menu=help_menu)
+
+        self.root.config(menu=menubar)
+
+        frm = ttk.Frame(root, padding=8)
+        frm.pack(fill='both', expand=True)
+
+        # ═══════════════════════════════════
+        # Notebook（頁籤容器）
+        # ═══════════════════════════════════
+        nb = ttk.Notebook(frm)
+        nb.pack(fill='both', expand=True)
+
+        tab1 = ttk.Frame(nb, padding=8)
+        tab2 = ttk.Frame(nb, padding=8)
+        tab3 = ttk.Frame(nb, padding=8)
+        tab4 = ttk.Frame(nb, padding=8)
+        tab5 = ttk.Frame(nb, padding=8)
+        tab6 = ttk.Frame(nb, padding=8)
+        nb.add(tab1, text=S('tab_translate'))
+        nb.add(tab2, text=S('tab_capture'))
+        nb.add(tab3, text=S('tab_quota'))
+        nb.add(tab4, text=S('tab_history'))
+        nb.add(tab5, text=S('tab_guide'))
+        nb.add(tab6, text=S('tab_session'))
+
+        # ══════════════════════════════════════════
+        # Tab 1 — 翻譯操作
+        # ══════════════════════════════════════════
+
+        # ── 雙列狀態列（貼底，必須最先 pack）──
+        status_wrap = ttk.Frame(tab1)
+        status_wrap.pack(side='bottom', fill='x', pady=(2, 0))
+
+
+        # 第一列：欄1 分析狀態、欄2 冷卻、欄3 留空、欄4 耗時
+        status_row1 = ttk.Frame(status_wrap)
+        status_row1.pack(fill='x')
+
+        # 欄4 耗時先 pack side=right，讓 expand 的欄1 不吃掉右側空間
+        self.elapsed_label = ttk.Label(
+            status_row1, text='', foreground='gray', font=('Arial', 9), anchor='e', width=8)
+        self.elapsed_label.pack(side='right')
+        self._trans_start_time = None
+        self._elapsed_timer_id = None
+
+        # 欄2 冷卻（固定寬度，不截字）
+        self.cooldown_label = ttk.Label(
+            status_row1, text='', foreground='gray', font=('Arial', 9), anchor='w', width=10)
+        self.cooldown_label.pack(side='right', padx=(4, 6))
+        self._cooldown_timer_id = None
+
+        # 欄1 分析狀態（fill 剩餘空間，不截字）
+        self.status = ttk.Label(
+            status_row1, text=S('status_ready'),
+            foreground='blue', font=('Arial', 9), anchor='w')
+        self.status.pack(side='left', fill='x', expand=True)
+
+        # 第二列：欄1 佇列狀態、欄4 四開關指示燈
+        status_row2 = ttk.Frame(status_wrap)
+        status_row2.pack(fill='x')
+
+        self.queue_label = ttk.Label(
+            status_row2, text='', foreground='gray', font=('Arial', 8), anchor='w')
+        self.queue_label.pack(side='left', expand=True)
+
+        indicator_frame = ttk.Frame(status_row2)
+        indicator_frame.pack(side='right')
+        self._ind_auto = tk.Label(
+            indicator_frame, text=S('ind_auto'), font=('Arial', 8), fg='gray', bg='#f0f0f0',
+            relief='flat', padx=3)
+        self._ind_auto.pack(side='left', padx=(0, 2))
+        self._ind_combo = tk.Label(
+            indicator_frame, text=S('ind_guide'), font=('Arial', 8), fg='gray', bg='#f0f0f0',
+            relief='flat', padx=3)
+        self._ind_combo.pack(side='left', padx=(0, 2))
+        self._ind_hotkey = tk.Label(
+            indicator_frame, text=S('ind_hotkey'), font=('Arial', 8), fg='gray', bg='#f0f0f0',
+            relief='flat', padx=3)
+        self._ind_hotkey.pack(side='left', padx=(0, 2))
+        self._ind_guide_hotkey = tk.Label(
+            indicator_frame, text=S('ind_guide_hotkey'), font=('Arial', 8), fg='gray', bg='#f0f0f0',
+            relief='flat', padx=3)
+        self._ind_guide_hotkey.pack(side='left')
+        self._update_indicators()
+
+        # ── 引擎模式切換（雲端 / 本地） ──
+        eng_mode_row1 = ttk.Frame(tab1)
+        eng_mode_row1.pack(fill='x', pady=(0, 2))
+        ttk.Label(eng_mode_row1, text=S('lbl_engine'), font=('Arial', 9, 'bold')).pack(side='left')
+
+        # OLLAMA 未偵測到時，本地選項 disabled
+        _local_state = 'normal' if self._ollama_available else 'disabled'
+        _saved_mode = self.config.get('engine_mode', 'cloud')
+        if not self._ollama_available and _saved_mode == 'local':
+            _saved_mode = 'cloud'  # OLLAMA 不可用時本地模式才強制回雲端
+        self.engine_mode_var = tk.StringVar(value=_saved_mode)
+
+        eng_mode_row = ttk.Frame(tab1)
+        eng_mode_row.pack(fill='x', pady=(0, 4))
+        ttk.Radiobutton(eng_mode_row, text=S('rb_engine_cloud'),
+                        variable=self.engine_mode_var, value='cloud',
+                        command=self._on_engine_mode_change).pack(side='left', padx=(4, 0))
+        ttk.Radiobutton(eng_mode_row, text=S('rb_engine_local'),
+                        variable=self.engine_mode_var, value='local',
+                        state=_local_state,
+                        command=self._on_engine_mode_change).pack(side='left', padx=(8, 0))
+        ttk.Radiobutton(eng_mode_row, text=S('rb_engine_ocr'),
+                        variable=self.engine_mode_var, value='ocr',
+                        command=self._on_engine_mode_change).pack(side='left', padx=(8, 0))
+
+        # ── 引擎內容容器（固定在引擎切換列正下方）──
+        self.engine_container = ttk.Frame(tab1)
+        self.engine_container.pack(fill='x')
+
+        # ── 雲端引擎區塊 ──
+        self.cloud_frame = ttk.Frame(self.engine_container)
+
+        # 五引擎單選
+        self.engine_var = tk.StringVar(value='gemini')
+        engine_rb_frame = ttk.Frame(self.cloud_frame)
+        engine_rb_frame.pack(fill='x', pady=2)
+        for eng in ENGINE_ORDER:
+            ttk.Radiobutton(
+                engine_rb_frame, text=ENGINE_DISPLAY[eng],
+                variable=self.engine_var, value=eng,
+                command=self._on_engine_change
+            ).pack(side='left', padx=(0, 6))
+
+        # API Key
+        self.key_label = ttk.Label(self.cloud_frame, text='Gemini API Key:', font=('Arial', 9, 'bold'))
+        self.key_label.pack(anchor='w', pady=(6, 0))
+        self.api_entry = ttk.Entry(self.cloud_frame, show='*', width=55)
+        self.api_entry.pack(pady=2, fill='x')
+
+        # 模型選擇
+        ttk.Label(self.cloud_frame, text=S('lbl_model'), font=('Arial', 9)).pack(anchor='w', pady=(4, 0))
+        self.model_var = tk.StringVar()
+        model_row = ttk.Frame(self.cloud_frame)
+        model_row.pack(fill='x', pady=2)
+        self.model_combo = ttk.Combobox(model_row, textvariable=self.model_var, width=44, state='readonly')
+        self.model_combo.pack(side='left', fill='x', expand=True)
+        self.model_combo.bind('<<ComboboxSelected>>', lambda e: (self._refresh_quota(), self._update_cooldown_display()))
+        ttk.Button(model_row, text=S('btn_default_engine'), command=self._set_default_engine).pack(side='left', padx=(4, 0))
+
+        # 自訂模型
+        custom_frame = ttk.Frame(self.cloud_frame)
+        custom_frame.pack(fill='x', pady=(4, 0))
+        ttk.Label(custom_frame, text=S('lbl_custom_model'), font=('Arial', 8)).pack(side='left')
+        self.custom_model_var = tk.StringVar()
+        self.custom_model_entry = ttk.Entry(custom_frame, textvariable=self.custom_model_var, width=33)
+        self.custom_model_entry.pack(side='left', padx=4)
+        ttk.Button(custom_frame, text=S('btn_add'), command=self._add_custom_model, width=5).pack(side='left', padx=2)
+        ttk.Button(custom_frame, text=S('btn_remove'), command=self._remove_custom_model, width=5).pack(side='left', padx=2)
+
+        # 配額顯示
+        self.quota_label = ttk.Label(self.cloud_frame, text='', foreground='brown', font=('Arial', 9, 'bold'))
+        self.quota_label.pack(anchor='w', pady=(4, 0))
+
+        self._init_engine_ui()
+
+        # ── 本地引擎區塊（OLLAMA） ──
+        self.local_frame = ttk.Frame(self.engine_container)
+
+        if self._ollama_available:
+            ollama_inner = ttk.LabelFrame(self.local_frame, text=S('lf_ollama'))
+            ollama_inner.pack(fill='x', padx=2, pady=(0, 4))
+
+            # 過濾開關列
+            filter_row = ttk.Frame(ollama_inner)
+            filter_row.pack(fill='x', padx=6, pady=(4, 2))
+            ttk.Label(filter_row, text=S('lbl_ollama_detected'),
+                      font=('Arial', 8), foreground='gray').pack(side='left')
+            self.vision_filter_var = tk.BooleanVar(
+                value=self.config.get('ollama_vision_filter', True))
+            ttk.Checkbutton(
+                filter_row, text=S('cb_vision_filter'),
+                variable=self.vision_filter_var,
+                command=self._on_vision_filter_toggle
+            ).pack(side='right')
+
+            # 模型下拉（初始依過濾開關決定清單）
+            _init_models = (
+                _filter_vision_models(self._ollama_models)
+                if self.vision_filter_var.get()
+                else self._ollama_models
+            )
+            _saved_model = self.config.get('ollama_model', _init_models[0])
+            if _saved_model not in _init_models:
+                _saved_model = _init_models[0]
+            self.ollama_model_var = tk.StringVar(value=_saved_model)
+            self.ollama_combo = ttk.Combobox(
+                ollama_inner, textvariable=self.ollama_model_var,
+                values=_init_models, state='readonly', width=44)
+            self.ollama_combo.pack(padx=6, pady=(0, 2), fill='x')
+            self.ollama_combo.bind('<<ComboboxSelected>>', self._on_use_ollama_toggle)
+            timeout_row = ttk.Frame(ollama_inner)
+            timeout_row.pack(fill='x', padx=6, pady=(2, 2))
+            ttk.Label(timeout_row, text=S('lbl_ollama_timeout'),
+                      font=('Arial', 9)).pack(side='left')
+            self.ollama_timeout_var = tk.StringVar(
+                value=str(self.config.get('ollama_timeout', OLLAMA_TIMEOUT)))
+            ttk.Entry(timeout_row, textvariable=self.ollama_timeout_var, width=6).pack(side='left', padx=4)
+            ttk.Label(timeout_row, text='（建議 30～120，依模型大小調整）',
+                      font=('Arial', 8), foreground='gray').pack(side='left')
+            self.ollama_timeout_var.trace_add('write', lambda *_: self._debounce_save_config())
+        else:
+            self.ollama_model_var   = tk.StringVar(value='')
+            self.ollama_timeout_var = tk.StringVar(value=str(OLLAMA_TIMEOUT))
+            self.vision_filter_var  = tk.BooleanVar(value=True)
+            self.ollama_combo       = None
+
+        # ── OCR 引擎區塊 ──
+        self.ocr_frame = ttk.Frame(self.engine_container)
+        ocr_inner = ttk.LabelFrame(self.ocr_frame, text='🔍 ' + ('Local OCR + Google Translate' if CURRENT_LANG=="en" else '本地OCR + Google 翻譯'))
+        ocr_inner.pack(fill='x', padx=2, pady=(0, 4))
+        ttk.Label(ocr_inner,
+                  text='Local EasyOCR detects text coords, Google Translate' if CURRENT_LANG=="en" else '本地 EasyOCR 辨識文字座標，Google 翻譯',
+                  font=('Arial', 8), foreground='gray').pack(anchor='w', padx=6, pady=(4, 2))
+        ttk.Label(ocr_inner,
+                  text='',
+                  font=('Arial', 8), foreground='steelblue').pack(anchor='w', padx=6, pady=(0, 4))
+
+
+        # use_ollama_var：本地模式開啟即視為啟用
+        self.use_ollama_var = tk.BooleanVar(value=(_saved_mode == 'local'))
+
+        # 初始顯示正確區塊
+        if not hasattr(self, 'ocr_frame'):
+            self.ocr_frame = ttk.Frame(self.engine_container)  # 防呼叫順序問題
+        self._apply_engine_mode(animate=False)
+
+        # 語言設定
+        lang_frame = ttk.LabelFrame(tab1, text=S('lf_lang'))
+        lang_frame.pack(fill='x', pady=(0, 4), padx=2)
+
+        src_row = ttk.Frame(lang_frame)
+        src_row.pack(fill='x', pady=(4, 2), padx=6)
+        ttk.Label(src_row, text=S('lbl_src_lang'), font=('Arial', 9), width=10).pack(side='left')
+        self.src_lang_var = tk.StringVar(value=self.config.get('src_lang', 'Japanese(日文)'))
+        src_combo = ttk.Combobox(src_row, textvariable=self.src_lang_var,
+                                  values=GAME_LANGUAGES, state='readonly', width=40)
+        src_combo.pack(side='left', padx=4)
+
+        tgt_row = ttk.Frame(lang_frame)
+        tgt_row.pack(fill='x', pady=(2, 6), padx=6)
+        ttk.Label(tgt_row, text=S('lbl_tgt_lang'), font=('Arial', 9), width=10).pack(side='left')
+        self.tgt_lang_var = tk.StringVar(
+            value=self.config.get('tgt_lang', 'Traditional Chinese(正體中文)'))
+        tgt_combo = ttk.Combobox(tgt_row, textvariable=self.tgt_lang_var,
+                                  values=TARGET_LANGUAGES, state='readonly', width=40)
+        tgt_combo.pack(side='left', padx=4)
+
+        # 排版模式
+        dir_frame = ttk.Frame(tab1)
+        dir_frame.pack(fill='x', pady=(4, 0))
+        ttk.Label(dir_frame, text=S('lbl_layout'), font=('Arial', 9)).pack(side='left')
+        self.text_dir_var = tk.StringVar(value=self.config.get('text_direction', 'horizontal'))
+        ttk.Radiobutton(dir_frame, text=S('rb_horizontal'), variable=self.text_dir_var, value='horizontal').pack(side='left', padx=(8, 0))
+        ttk.Radiobutton(dir_frame, text=S('rb_vertical'), variable=self.text_dir_var, value='vertical').pack(side='left', padx=(8, 0))
+
+        # 遊戲平台
+        platform_frame = ttk.LabelFrame(tab1, text=S('lf_platform'))
+        platform_frame.pack(fill='x', pady=(6, 0), padx=2)
+
+        # 模式單選（模擬器 / 遊戲平台）
+        pmode_row = ttk.Frame(platform_frame)
+        pmode_row.pack(fill='x', pady=(4, 2), padx=6)
+        self.platform_mode_var = tk.StringVar(
+            value=self.config.get('platform_mode', 'platform'))
+        ttk.Radiobutton(pmode_row, text=S('rb_platform_mode'), variable=self.platform_mode_var,
+                        value='platform', command=self._on_platform_mode_change).pack(side='left')
+        ttk.Radiobutton(pmode_row, text=S('rb_emulator_mode'), variable=self.platform_mode_var,
+                        value='emulator', command=self._on_platform_mode_change).pack(side='left', padx=(12, 0))
+
+        pcat_row = ttk.Frame(platform_frame)
+        pcat_row.pack(fill='x', pady=(4, 2), padx=6)
+        ttk.Label(pcat_row, text=S('lbl_category'), font=('Arial', 9), width=8).pack(side='left')
+        _active_data = PLATFORMS if self.platform_mode_var.get() == 'platform' else EMULATORS
+        platform_categories = list(_active_data.keys())
+        self.platform_category_var = tk.StringVar(
+            value=self.config.get('platform_category', platform_categories[0] if platform_categories else ''))
+        self.platform_category_combo = ttk.Combobox(
+            pcat_row, textvariable=self.platform_category_var,
+            values=platform_categories, state='readonly', width=36)
+        self.platform_category_combo.pack(side='left', padx=4)
+        self.platform_category_combo.bind('<<ComboboxSelected>>', self._on_platform_category_change)
+
+        pval_row = ttk.Frame(platform_frame)
+        pval_row.pack(fill='x', pady=(2, 6), padx=6)
+        ttk.Label(pval_row, text=S('lbl_platform'), font=('Arial', 9), width=8).pack(side='left')
+        init_cat = self.platform_category_var.get()
+        init_platforms = _active_data.get(init_cat, [])
+        saved_platform = self.config.get('platform', init_platforms[0] if init_platforms else '')
+        self.platform_var = tk.StringVar(value=saved_platform)
+        self.platform_combo = ttk.Combobox(
+            pval_row, textvariable=self.platform_var,
+            values=init_platforms, state='readonly', width=36)
+        self.platform_combo.pack(side='left', padx=4)
+        self.platform_combo.bind('<<ComboboxSelected>>', self._on_platform_change)
+
+        # 按鈕列
+        btn_frame = ttk.Frame(tab1)
+        btn_frame.pack(pady=10, fill='x')
+        # 自動擷取按鈕（依 auto_trans 狀態決定文字與啟用）
+        _auto_enabled = False  # 自動翻譯不儲存狀態，每次啟動預設關閉
+        self.auto_cap_btn = ttk.Button(
+            btn_frame,
+            text=S('btn_auto_cap_on') if _auto_enabled else S('btn_auto_cap_off'),
+            command=self._on_auto_cap_btn,
+            state='normal' if _auto_enabled else 'disabled')
+        self.auto_cap_btn.pack(side='left', padx=(0, 4), expand=True, fill='x')
+        self._auto_cap_tooltip = _Tooltip(self.auto_cap_btn, S('btn_auto_cap_tooltip'))
+        self.btn_capture = ttk.Button(btn_frame, text=S('btn_capture_trans'), command=self.start_worker)
+        self.btn_capture.pack(side='left', padx=(0, 4), expand=True, fill='x')
+        self.btn_guide = ttk.Button(btn_frame, text=S('btn_guide'), command=self.start_guide_worker)
+        self.btn_guide.pack(side='left', padx=4, expand=True, fill='x')
+        self.btn_file = ttk.Button(btn_frame, text=S('btn_file_trans'), command=self.pick_image_file)
+        self.btn_file.pack(side='left', padx=(4, 0), expand=True, fill='x')
+
+        # ── 場次錄製區塊 ──
+        session_frame = ttk.LabelFrame(tab1, text=S('lf_session'))
+        session_frame.pack(fill='x', pady=(6, 0), padx=2)
+
+        sess_btn_row1 = ttk.Frame(session_frame)
+        sess_btn_row1.pack(fill='x', padx=6, pady=(4, 2))
+        self._btn_session_start = ttk.Button(
+            sess_btn_row1, text=S('btn_start_session'),
+            command=self._start_session)
+        self._btn_session_start.pack(side='left', expand=True, fill='x', padx=(0, 4))
+        self._btn_session_stop = ttk.Button(
+            sess_btn_row1, text=S('btn_stop_session'),
+            command=self._stop_session, state='disabled')
+        self._btn_session_stop.pack(side='left', expand=True, fill='x')
+
+        sess_btn_row2 = ttk.Frame(session_frame)
+        sess_btn_row2.pack(fill='x', padx=6, pady=(2, 4))
+        self._btn_playback_open = ttk.Button(
+            sess_btn_row2, text=S('btn_open_playback'),
+            command=self._open_playback_window, state='disabled')
+        self._btn_playback_open.pack(side='left', expand=True, fill='x', padx=(0, 4))
+        self._session_status_label = ttk.Label(
+            sess_btn_row2, text=S('session_idle'),
+            foreground='gray', font=('Arial', 9))
+        self._session_status_label.pack(side='left', padx=4)
+
+        # ══════════════════════════════════════════
+        # Tab 2 — 擷取設定
+        # ══════════════════════════════════════════
+
+        # 目標視窗
+        ttk.Label(tab2, text=S('lbl_target_win'), font=('Arial', 9)).pack(anchor='w')
+        target_frame = ttk.Frame(tab2)
+        target_frame.pack(fill='x', pady=2)
+        saved_targets = self.config.get('target_windows', ['Mesen'])
+        if not saved_targets:
+            saved_targets = ['Mesen']
+        self.title_var = tk.StringVar(value=saved_targets[0])
+        self.target_combo = ttk.Combobox(target_frame, textvariable=self.title_var, width=36)
+        self.target_combo['values'] = saved_targets
+        self.target_combo.pack(side='left')
+        ttk.Button(target_frame, text=S('btn_add'), command=self._add_target_window, width=5).pack(side='left', padx=2)
+        ttk.Button(target_frame, text=S('btn_remove'), command=self._remove_target_window, width=5).pack(side='left', padx=2)
+
+        # 點選視窗按鈕列
+        pick_frame = ttk.Frame(tab2)
+        pick_frame.pack(fill='x', pady=(2, 0))
+        self.pick_window_btn = ttk.Button(
+            pick_frame, text=S('btn_pick_window'),
+            command=self._start_pick_window, width=12)
+        self.pick_window_btn.pack(side='left')
+        self.pick_cancel_btn = ttk.Button(
+            pick_frame, text=S('btn_cancel'),
+            command=self._cancel_pick_window, width=6, state='disabled')
+        self.pick_cancel_btn.pack(side='left', padx=(4, 0))
+        self.pick_hint_label = ttk.Label(
+            pick_frame, text='', foreground='orange', font=('Arial', 9))
+        self.pick_hint_label.pack(side='left', padx=(8, 0))
+        self._pick_countdown_id = None
+
+        # 裁切頂部
+        crop_frame = ttk.Frame(tab2)
+        crop_frame.pack(fill='x', pady=(8, 0))
+        ttk.Label(crop_frame, text=S('lbl_crop_top'), font=('Arial', 9)).pack(side='left')
+        self.crop_top_var = tk.StringVar(value=str(self.config.get('crop_top', 0)))
+        ttk.Entry(crop_frame, textvariable=self.crop_top_var, width=5).pack(side='left', padx=3)
+        ttk.Label(crop_frame, text=S('lbl_crop_hint'), font=('Arial', 8), foreground='gray').pack(side='left')
+
+        # 視窗模式
+        winmode_frame = ttk.LabelFrame(tab2, text=S('lf_winmode'))
+        winmode_frame.pack(fill='x', pady=(10, 0), padx=2)
+        self.winmode_var = tk.StringVar(value=self.config.get('winmode', 'mesen'))
+        ttk.Radiobutton(winmode_frame, text=S('rb_winmode_main'),
+            variable=self.winmode_var, value='main',
+            command=self._on_winmode_change).pack(anchor='w', padx=10, pady=2)
+        ttk.Radiobutton(winmode_frame, text=S('rb_winmode_mesen'),
+            variable=self.winmode_var, value='mesen',
+            command=self._on_winmode_change).pack(anchor='w', padx=10, pady=2)
+        ttk.Radiobutton(winmode_frame, text=S('rb_winmode_corner'),
+            variable=self.winmode_var, value='corner',
+            command=self._on_winmode_change).pack(anchor='w', padx=10, pady=2)
+        ttk.Radiobutton(winmode_frame, text=S('rb_winmode_sides'),
+            variable=self.winmode_var, value='sides',
+            command=self._on_winmode_change).pack(anchor='w', padx=10, pady=2)
+
+        ttk.Separator(tab2, orient='horizontal').pack(fill='x', pady=10)
+
+        # 擷取翻譯快捷鍵
+        hotkey_frame = ttk.Frame(tab2)
+        hotkey_frame.pack(fill='x', pady=(0, 4))
+        ttk.Label(hotkey_frame, text=S('lbl_hotkey'), font=('Arial', 9), width=16).pack(side='left')
+        self.hotkey_var = tk.StringVar(value=self.config.get('hotkey', DEFAULT_HOTKEY))
+        self.hotkey_entry = ttk.Entry(hotkey_frame, textvariable=self.hotkey_var, width=16)
+        self.hotkey_entry.pack(side='left', padx=4)
+        self.hotkey_btn = ttk.Button(hotkey_frame, text=S('btn_enable'), command=self._toggle_hotkey, width=6)
+        self.hotkey_btn.pack(side='left', padx=2)
+        self.hotkey_active = False
+        self.hotkey_status = ttk.Label(hotkey_frame, text=S('lbl_hotkey_off'), foreground='gray', font=('Arial', 8))
+        self.hotkey_status.pack(side='left', padx=4)
+
+        # 攻略快捷鍵
+        guide_hk_frame = ttk.Frame(tab2)
+        guide_hk_frame.pack(fill='x', pady=(0, 4))
+        ttk.Label(guide_hk_frame, text=S('lbl_guide_hotkey'), font=('Arial', 9), width=16).pack(side='left')
+        self.guide_hotkey_var = tk.StringVar(value=self.config.get('guide_hotkey', 'ctrl+f3'))
+        ttk.Entry(guide_hk_frame, textvariable=self.guide_hotkey_var, width=16).pack(side='left', padx=4)
+        self.guide_hotkey_btn = ttk.Button(guide_hk_frame, text=S('btn_enable'), command=self._toggle_guide_hotkey, width=6)
+        self.guide_hotkey_btn.pack(side='left', padx=2)
+        self.guide_hotkey_active = False
+        self.guide_hotkey_status = ttk.Label(guide_hk_frame, text=S('lbl_hotkey_off'), foreground='gray', font=('Arial', 8))
+        self.guide_hotkey_status.pack(side='left', padx=4)
+
+        # 截取翻譯同時攻略開關
+        combo_frame = ttk.Frame(tab2)
+        combo_frame.pack(fill='x', pady=(8, 0))
+        self.combo_guide_var = tk.BooleanVar(value=self.config.get('combo_guide', False))
+        ttk.Checkbutton(combo_frame, text=S('cb_combo_guide'),
+            variable=self.combo_guide_var, command=self._on_combo_guide_toggle).pack(side='left')
+        self.combo_guide_status = ttk.Label(combo_frame, text=S('lbl_combo_off'),
+            foreground='gray', font=('Arial', 9))
+        self.combo_guide_status.pack(side='left', padx=8)
+        self._update_combo_guide_status()
+
+        # ── 自動翻譯設定 ──
+        auto_lf = ttk.LabelFrame(tab2, text=S('lf_auto_trans'), padding=6)
+        auto_lf.pack(fill='x', pady=(8, 0))
+
+        # 啟用 Checkbutton + 狀態標籤
+        auto_top = ttk.Frame(auto_lf)
+        auto_top.pack(fill='x')
+        self.auto_trans_var = tk.BooleanVar(value=False)  # 不從 config 讀取
+        ttk.Checkbutton(auto_top, text=S('cb_auto_trans'),
+            variable=self.auto_trans_var, command=self._on_auto_trans_toggle).pack(side='left')
+        init_status = S('status_on') if self.auto_trans_var.get() else S('status_off')
+        init_color  = 'green'       if self.auto_trans_var.get() else 'gray'
+        self.auto_trans_status = ttk.Label(auto_top, text=init_status,
+            foreground=init_color, font=('Arial', 9))
+        self.auto_trans_status.pack(side='left', padx=8)
+
+        # 差異門檻
+        diff_row = ttk.Frame(auto_lf)
+        diff_row.pack(fill='x', pady=(4, 0))
+        ttk.Label(diff_row, text=S('lbl_diff_threshold'), font=('Arial', 9), width=12).pack(side='left')
+        self.stable_diff_var = tk.StringVar(
+            value=str(self.config.get('stable_diff', STABLE_DIFF_DEFAULT)))
+        diff_entry = ttk.Entry(diff_row, textvariable=self.stable_diff_var, width=5)
+        diff_entry.pack(side='left', padx=4)
+        self.stable_diff_var.trace_add('write', lambda *_: self._debounce_save_config())
+
+        # 穩定次數
+        count_row = ttk.Frame(auto_lf)
+        count_row.pack(fill='x', pady=(4, 0))
+        ttk.Label(count_row, text=S('lbl_stable_count'), font=('Arial', 9), width=12).pack(side='left')
+        self.stable_count_var = tk.StringVar(
+            value=str(self.config.get('stable_count', STABLE_COUNT_DEFAULT)))
+        count_entry = ttk.Entry(count_row, textvariable=self.stable_count_var, width=5)
+        count_entry.pack(side='left', padx=4)
+        self.stable_count_var.trace_add('write', lambda *_: self._debounce_save_config())
+
+        # 提示文字
+        ttk.Label(auto_lf, text=S('stable_hint'),
+            foreground='gray', font=('Arial', 8)).pack(anchor='w', pady=(2, 0))
+
+        # 螢幕選擇
+        ttk.Separator(tab2, orient='horizontal').pack(fill='x', pady=(10, 6))
+        screen_frame = ttk.Frame(tab2)
+        screen_frame.pack(fill='x', pady=(0, 4))
+        ttk.Label(screen_frame, text=S('lbl_screen'), font=('Arial', 9), width=12).pack(side='left')
+        screen_labels = [m['label'] for m in self._monitors]
+        saved_scr_idx = self.config.get('main_screen', 1)
+        _scr_mon = next((m for m in self._monitors if m['index'] == saved_scr_idx),
+                        self._monitors[0])
+        self.screen_var = tk.StringVar(value=_scr_mon['label'])
+        self.screen_combo = ttk.Combobox(
+            screen_frame, textvariable=self.screen_var,
+            values=screen_labels, state='readonly', width=28)
+        self.screen_combo.pack(side='left', padx=4)
+        self.screen_combo.bind('<<ComboboxSelected>>', self._on_screen_change)
+
+        # ══════════════════════════════════════════
+        # Tab 3 — 引擎配額
+        # ══════════════════════════════════════════
+        ttk.Label(tab3, text=S('lbl_quota_title'), font=('Arial', 10, 'bold')).pack(anchor='w', pady=(0, 6))
+
+        quota_scroll_frame = ttk.Frame(tab3)
+        quota_scroll_frame.pack(fill='both', expand=True)
+
+        # Treeview 取代 Text widget
+        cols = ('engine', 'model', 'used', 'limit', 'rpm')
+        self.quota_table = ttk.Treeview(
+            quota_scroll_frame, columns=cols, show='headings',
+            selectmode='none', height=20)
+        self.quota_table.heading('engine', text=S('th_engine'), anchor='w')
+        self.quota_table.heading('model',  text=S('th_model'),  anchor='w')
+        self.quota_table.heading('used',   text=S('th_used'),   anchor='e')
+        self.quota_table.heading('limit',  text=S('th_limit'),  anchor='e')
+        self.quota_table.heading('rpm',    text='RPM',           anchor='e')
+        self.quota_table.column('engine', width=62,  stretch=False, anchor='w')
+        self.quota_table.column('model',  width=230, stretch=True,  anchor='w')
+        self.quota_table.column('used',   width=44,  stretch=False, anchor='e')
+        self.quota_table.column('limit',  width=56,  stretch=False, anchor='e')
+        self.quota_table.column('rpm',    width=44,  stretch=False, anchor='e')
+        # 交替底色 tag
+        self.quota_table.tag_configure('odd',     background='#f5f5f5')
+        self.quota_table.tag_configure('even',    background='#ffffff')
+        self.quota_table.tag_configure('current', background='#d0eaff', font=('Arial', 9, 'bold'))
+        self.quota_table.tag_configure('no_quota',foreground='#cc0000')
+        self.quota_table.tag_configure('sep',     background='#e0e0e0')
+        quota_sb = ttk.Scrollbar(quota_scroll_frame, orient='vertical',
+                                 command=self.quota_table.yview)
+        self.quota_table.configure(yscrollcommand=quota_sb.set)
+        quota_sb.pack(side='right', fill='y')
+        self.quota_table.pack(side='left', fill='both', expand=True)
+
+        ttk.Button(tab3, text=S('btn_refresh'), command=self._refresh_quota_table).pack(pady=(6, 0))
+
+        # ══════════════════════════════════════════
+        # Tab 4 — 歷史翻譯資料
+        # ══════════════════════════════════════════
+
+        # ── 上半：遊戲篩選 + Treeview 清單 ──
+        # ── 上半：遊戲篩選（兩列）+ Treeview 清單 ──
+        # 第一列：遊戲、視窗
+        t4_filter1 = ttk.Frame(tab4)
+        t4_filter1.pack(fill='x', pady=(0, 2))
+        ttk.Label(t4_filter1, text=S('lbl_game'), font=('Arial', 9)).pack(side='left')
+        self.t4_game_var = tk.StringVar(value=S('all_games'))
+        self.t4_game_combo = ttk.Combobox(
+            t4_filter1, textvariable=self.t4_game_var, width=18, state='readonly')
+        self.t4_game_combo.pack(side='left', padx=(2, 6))
+        self.t4_game_combo.bind('<<ComboboxSelected>>', lambda e: self._t4_load_list())
+        ttk.Label(t4_filter1, text=S('lbl_window'), font=('Arial', 9)).pack(side='left')
+        self.t4_window_var = tk.StringVar(value=S('all_windows'))
+        self.t4_window_combo = ttk.Combobox(
+            t4_filter1, textvariable=self.t4_window_var, width=12, state='readonly')
+        self.t4_window_combo.pack(side='left', padx=(2, 0))
+        self.t4_window_combo.bind('<<ComboboxSelected>>', lambda e: self._t4_load_list())
+
+        # 第二列：平台、刪除
+        t4_filter2 = ttk.Frame(tab4)
+        t4_filter2.pack(fill='x', pady=(0, 2))
+        ttk.Label(t4_filter2, text=S('lbl_platform_f'), font=('Arial', 9)).pack(side='left')
+        self.t4_platform_var = tk.StringVar(value=S('all_platforms'))
+        self.t4_platform_combo = ttk.Combobox(
+            t4_filter2, textvariable=self.t4_platform_var, width=12, state='readonly')
+        self.t4_platform_combo.pack(side='left', padx=(2, 0))
+        self.t4_platform_combo.bind('<<ComboboxSelected>>', lambda e: self._t4_load_list())
+        ttk.Button(t4_filter2, text=S('btn_delete'), command=self._t4_delete).pack(side='right')
+
+        t4_tree_frame = ttk.Frame(tab4)
+        t4_tree_frame.pack(fill='x')
+        self.t4_tree = ttk.Treeview(
+            t4_tree_frame, columns=('rom_name', 'time', 'target_window', 'platform'),
+            show='headings', height=5, selectmode='browse')
+        self.t4_tree.heading('rom_name',      text=S('th_rom'))
+        self.t4_tree.heading('time',          text=S('th_time'))
+        self.t4_tree.heading('target_window', text=S('th_window'))
+        self.t4_tree.heading('platform',      text=S('th_platform'))
+        self.t4_tree.column('rom_name',      width=160, stretch=True)
+        self.t4_tree.column('time',          width=135, anchor='center', stretch=False)
+        self.t4_tree.column('target_window', width=80,  stretch=False)
+        self.t4_tree.column('platform',      width=90,  stretch=False)
+        t4_tree_sb = ttk.Scrollbar(t4_tree_frame, orient='vertical', command=self.t4_tree.yview)
+        self.t4_tree.configure(yscrollcommand=t4_tree_sb.set)
+        t4_tree_sb.pack(side='right', fill='y')
+        self.t4_tree.pack(side='left', fill='x', expand=True)
+        self.t4_tree.bind('<<TreeviewSelect>>', self._t4_on_select)
+
+        # ── 修正平台區塊 ──
+        t4_fix_frame = ttk.LabelFrame(tab4, text=S('lf_fix_platform'))
+        t4_fix_frame.pack(fill='x', pady=(4, 0))
+
+        # 模式選擇列（遊戲平台 / 模擬器）
+        t4_fix_mode_row = ttk.Frame(t4_fix_frame)
+        t4_fix_mode_row.pack(fill='x', padx=6, pady=(4, 2))
+        ttk.Label(t4_fix_mode_row, text=S('lbl_fix_mode'), font=('Arial', 9), width=8).pack(side='left')
+        self.t4_fix_mode_var = tk.StringVar(value='platform')
+        ttk.Radiobutton(t4_fix_mode_row, text=S('rb_platform_mode'),
+                        variable=self.t4_fix_mode_var, value='platform',
+                        command=self._on_t4_fix_mode_change).pack(side='left', padx=(4, 8))
+        ttk.Radiobutton(t4_fix_mode_row, text=S('rb_emulator_mode'),
+                        variable=self.t4_fix_mode_var, value='emulator',
+                        command=self._on_t4_fix_mode_change).pack(side='left')
+
+        t4_fix_row1 = ttk.Frame(t4_fix_frame)
+        t4_fix_row1.pack(fill='x', padx=6, pady=(2, 2))
+        ttk.Label(t4_fix_row1, text=S('lbl_fix_cat'), font=('Arial', 9), width=8).pack(side='left')
+        fix_categories = list(PLATFORMS.keys())
+        self.t4_fix_category_var = tk.StringVar(
+            value=fix_categories[0] if fix_categories else '')
+        self.t4_fix_category_combo = ttk.Combobox(
+            t4_fix_row1, textvariable=self.t4_fix_category_var,
+            values=fix_categories, state='readonly', width=30)
+        self.t4_fix_category_combo.pack(side='left', padx=4)
+        self.t4_fix_category_combo.bind('<<ComboboxSelected>>', self._on_t4_fix_category_change)
+
+        t4_fix_row2 = ttk.Frame(t4_fix_frame)
+        t4_fix_row2.pack(fill='x', padx=6, pady=(2, 6))
+        ttk.Label(t4_fix_row2, text=S('lbl_fix_plat'), font=('Arial', 9), width=8).pack(side='left')
+        init_fix_cat = self.t4_fix_category_var.get()
+        init_fix_plats = PLATFORMS.get(init_fix_cat, [])
+        self.t4_fix_platform_var = tk.StringVar(
+            value=init_fix_plats[0] if init_fix_plats else '')
+        self.t4_fix_platform_combo = ttk.Combobox(
+            t4_fix_row2, textvariable=self.t4_fix_platform_var,
+            values=init_fix_plats, state='readonly', width=30)
+        self.t4_fix_platform_combo.pack(side='left', padx=4)
+        ttk.Button(t4_fix_row2, text=S('btn_apply_plat'),
+                   command=self._t4_apply_platform).pack(side='left', padx=(8, 0))
+
+        ttk.Separator(tab4, orient='horizontal').pack(fill='x', pady=4)
+
+        # ── 下半：疊圖切換 + 截圖 + 譯文 ──
+        t4_ctrl = ttk.Frame(tab4)
+        t4_ctrl.pack(fill='x', pady=(0, 4))
+        self.t4_overlay_var = tk.BooleanVar(value=True)
+        self.t4_toggle_btn = ttk.Button(
+            t4_ctrl, text=S('btn_overlay'), width=12, command=self._t4_toggle_overlay)
+        self.t4_toggle_btn.pack(side='left')
+
+        # 截圖顯示（tk.Label，靠左，最大寬度 550）
+        self.t4_img_label = tk.Label(tab4, bg='#111', anchor='nw')
+        self.t4_img_label.pack(fill='x')
+
+
+
+        # 暫存當筆資料（供疊圖/純圖切換用）
+        self._t4_current_segments = []
+        self._t4_current_img_path  = None
+        self._t4_current_db_id     = None
+        self._t4_tk_img            = None  # 防止 GC
+
+        # ══════════════════════════════════════════
+        # Tab 5 — 歷史攻略資料
+        # ══════════════════════════════════════════
+
+        # ── 上半：遊戲篩選 + Treeview 清單 ──
+        t5_filter = ttk.Frame(tab5)
+        t5_filter.pack(fill='x', pady=(0, 4))
+        ttk.Label(t5_filter, text=S('lbl_game'), font=('Arial', 9)).pack(side='left')
+        self.t5_game_var = tk.StringVar(value=S('all_games'))
+        self.t5_game_combo = ttk.Combobox(
+            t5_filter, textvariable=self.t5_game_var, width=28, state='readonly')
+        self.t5_game_combo.pack(side='left', padx=4)
+        self.t5_game_combo.bind('<<ComboboxSelected>>', lambda e: self._t5_load_list())
+        ttk.Button(t5_filter, text=S('btn_delete'), command=self._t5_delete).pack(side='right')
+
+        t5_tree_frame = ttk.Frame(tab5)
+        t5_tree_frame.pack(fill='x')
+        self.t5_tree = ttk.Treeview(
+            t5_tree_frame, columns=('rom_name', 'time', 'progress'),
+            show='headings', height=6, selectmode='browse')
+        self.t5_tree.heading('rom_name',  text=S('th_rom'))
+        self.t5_tree.heading('time',      text=S('th_time'))
+        self.t5_tree.heading('progress',  text=S('th_progress'))
+        self.t5_tree.column('rom_name',  width=160, stretch=True)
+        self.t5_tree.column('time',      width=135, anchor='center', stretch=False)
+        self.t5_tree.column('progress',  width=160)
+        t5_tree_sb = ttk.Scrollbar(t5_tree_frame, orient='vertical', command=self.t5_tree.yview)
+        self.t5_tree.configure(yscrollcommand=t5_tree_sb.set)
+        t5_tree_sb.pack(side='right', fill='y')
+        self.t5_tree.pack(side='left', fill='x', expand=True)
+        self.t5_tree.bind('<<TreeviewSelect>>', self._t5_on_select)
+
+        ttk.Separator(tab5, orient='horizontal').pack(fill='x', pady=4)
+
+        # ── 下半：縮圖 + 進度 + 攻略 ──
+        t5_bottom = ttk.Frame(tab5)
+        t5_bottom.pack(fill='both', expand=True)
+
+        # 左側縮圖
+        t5_img_frame = ttk.Frame(t5_bottom)
+        t5_img_frame.pack(side='left', anchor='n', padx=(0, 8))
+        self.t5_guide_img_label = ttk.Label(t5_img_frame, text='', background='#cccccc', width=18)
+        self.t5_guide_img_label.pack()
+        self._t5_guide_tk_img = None  # 防止 GC
+
+        # 右側文字
+        t5_text_frame = ttk.Frame(t5_bottom)
+        t5_text_frame.pack(side='left', fill='both', expand=True)
+        ttk.Label(t5_text_frame, text=S('lbl_curr_prog'), font=('Arial', 10, 'bold')).pack(anchor='w')
+        self.t5_progress_label = ttk.Label(
+            t5_text_frame, text='', font=('Arial', 14, 'bold'),
+            wraplength=310, justify='left')
+        self.t5_progress_label.pack(anchor='w', pady=(2, 8))
+
+        ttk.Label(t5_text_frame, text=S('lbl_curr_guide'), font=('Arial', 10, 'bold')).pack(anchor='w')
+        t5_txt_frame = ttk.Frame(t5_text_frame)
+        t5_txt_frame.pack(fill='both', expand=True)
+        t5_txt_sb = ttk.Scrollbar(t5_txt_frame, orient='vertical')
+        t5_txt_sb.pack(side='right', fill='y')
+        self.t5_guide_text = tk.Text(
+            t5_txt_frame, wrap='word', state='disabled',
+            font=('Arial', 12), spacing1=4, spacing3=8,
+            yscrollcommand=t5_txt_sb.set)
+        t5_txt_sb.config(command=self.t5_guide_text.yview)
+        self.t5_guide_text.pack(side='left', fill='both', expand=True)
+
+        self._t5_current_db_id = None
+
+
+        # ══════════════════════════════════════════
+        # Tab 6 — 歷史錄製
+        # ══════════════════════════════════════════
+
+        # ── 篩選列 ──
+        t6_filter = ttk.Frame(tab6)
+        t6_filter.pack(fill='x', pady=(0, 2))
+        ttk.Label(t6_filter, text=S('lbl_game'), font=('Arial', 9)).pack(side='left')
+        self.t6_game_var = tk.StringVar(value=S('all_games'))
+        self.t6_game_combo = ttk.Combobox(
+            t6_filter, textvariable=self.t6_game_var, width=24, state='readonly')
+        self.t6_game_combo.pack(side='left', padx=4)
+        self.t6_game_combo.bind('<<ComboboxSelected>>', lambda e: self._t6_load_list())
+        ttk.Button(t6_filter, text=S('btn_session_delete'),
+                   command=self._t6_delete_session).pack(side='right')
+
+        # ── 場次清單 Treeview ──
+        t6_tree_frame = ttk.Frame(tab6)
+        t6_tree_frame.pack(fill='x')
+        self.t6_tree = ttk.Treeview(
+            t6_tree_frame,
+            columns=('game', 'started_at', 'frames', 'platform', 'size'),
+            show='headings', height=6, selectmode='browse')
+        self.t6_tree.heading('game',       text=S('th_session_game'))
+        self.t6_tree.heading('started_at', text=S('th_session_start'))
+        self.t6_tree.heading('frames',     text=S('th_session_frames'))
+        self.t6_tree.heading('platform',   text=S('th_session_plat'))
+        self.t6_tree.heading('size',       text=S('th_size'))
+        self.t6_tree.column('game',       width=130, stretch=True)
+        self.t6_tree.column('started_at', width=130, anchor='center', stretch=False)
+        self.t6_tree.column('frames',     width=50,  anchor='e',      stretch=False)
+        self.t6_tree.column('platform',   width=80,                   stretch=False)
+        self.t6_tree.column('size',       width=65,  anchor='e',      stretch=False)
+        t6_sb = ttk.Scrollbar(t6_tree_frame, orient='vertical', command=self.t6_tree.yview)
+        self.t6_tree.configure(yscrollcommand=t6_sb.set)
+        t6_sb.pack(side='right', fill='y')
+        self.t6_tree.pack(side='left', fill='x', expand=True)
+        self.t6_tree.bind('<<TreeviewSelect>>', self._t6_on_select)
+
+        ttk.Separator(tab6, orient='horizontal').pack(fill='x', pady=4)
+
+        # ── 操作區：回放按鈕 + 狀態資訊 ──
+        t6_ctrl = ttk.Frame(tab6)
+        t6_ctrl.pack(fill='x', pady=(0, 4))
+        self._btn_t6_replay = ttk.Button(
+            t6_ctrl, text=S('btn_session_replay'),
+            command=self._t6_replay_session, state='disabled')
+        self._btn_t6_replay.pack(side='left', padx=(0, 8))
+        self._t6_info_label = ttk.Label(
+            t6_ctrl, text='', font=('Arial', 9), foreground='gray')
+        self._t6_info_label.pack(side='left')
+
+        # ── 縮圖預覽（選取場次後顯示第一幀縮圖）──
+        self.t6_thumb_label = tk.Label(tab6, bg='#111', anchor='nw')
+        self.t6_thumb_label.pack(fill='both', expand=True)
+        self._t6_thumb_img  = None
+        self._t6_current_session_id = None
+
+        # ── 切換頁籤事件（Tab3/4/5/6 各自刷新） ──
+        nb.bind('<<NotebookTabChanged>>', self._on_tab_changed)
+
+        # ═══════════════════════════════════
+        # 翻譯結果視窗
+        # ═══════════════════════════════════
+        self.display = tk.Toplevel(root)
+        self.display.title('翻譯結果')
+        _load_app_icon(self.display)
+        self.display.attributes('-topmost', True)
+        self.display.configure(bg='black')
+        mesen_rect = self._find_mesen_window()
+        if mesen_rect:
+            disp_x = mesen_rect[2] + 10
+            disp_y = mesen_rect[1]
+        else:
+            disp_x = main_w + 10
+            disp_y = 0
+        self.display.geometry(f'{TARGET_DISPLAY_WIDTH}x{DISPLAY_INIT_HEIGHT}+{disp_x}+{disp_y}')
+
+        # 導覽列（底部，半透明黑底）
+        nav_bar = tk.Frame(self.display, bg='#222222')
+        nav_bar.pack(side='bottom', fill='x')
+        self._nav_prev_btn = tk.Button(
+            nav_bar, text='▲', bg='#222222', fg='white',
+            relief='flat', font=('Arial', 10, 'bold'),
+            activebackground='#444444', activeforeground='white',
+            command=self._nav_prev, width=3)
+        self._nav_prev_btn.pack(side='left', padx=4)
+        self._nav_label = tk.Label(
+            nav_bar, text='', bg='#222222', fg='#aaaaaa', font=('Arial', 8))
+        self._nav_label.pack(side='left', expand=True)
+        self._nav_next_btn = tk.Button(
+            nav_bar, text='▼', bg='#222222', fg='white',
+            relief='flat', font=('Arial', 10, 'bold'),
+            activebackground='#444444', activeforeground='white',
+            command=self._nav_next, width=3)
+        self._nav_next_btn.pack(side='right', padx=4)
+
+        self.canvas_label = tk.Label(self.display, bg='black')
+        self.canvas_label.pack(fill='both', expand=True)
+        self.display.withdraw()  # 啟動時隱藏，首次翻譯完成後才顯示
+
+        # 翻譯歷史導覽狀態
+        self._nav_rom_name  = ''    # 目前遊戲
+        self._nav_ids       = []    # 同遊戲所有 id（DESC）
+        self._nav_index     = 0     # 目前在清單中的位置（0=最新）
+
+        # ═══════════════════════════════════
+        # 攻略資訊視窗
+        # ═══════════════════════════════════
+        self.guide_display = tk.Toplevel(root)
+        self.guide_display.title('攻略資訊')
+        _load_app_icon(self.guide_display)
+        self.guide_display.attributes('-topmost', True)
+        self.guide_display.configure(bg='#1a1a2e')
+        guide_x = disp_x + TARGET_DISPLAY_WIDTH + 10
+        self.guide_display.geometry(f'{TARGET_DISPLAY_WIDTH}x{DISPLAY_INIT_HEIGHT}+{guide_x}+{disp_y}')
+
+        # 攻略導覽列（底部）
+        guide_nav_bar = tk.Frame(self.guide_display, bg='#2a2a4e')
+        guide_nav_bar.pack(side='bottom', fill='x')
+        self._guide_nav_prev_btn = tk.Button(
+            guide_nav_bar, text='▲', bg='#2a2a4e', fg='white',
+            relief='flat', font=('Arial', 10, 'bold'),
+            activebackground='#444466', activeforeground='white',
+            command=self._guide_nav_prev, width=3)
+        self._guide_nav_prev_btn.pack(side='left', padx=4)
+        self._guide_nav_label = tk.Label(
+            guide_nav_bar, text='', bg='#2a2a4e', fg='#aaaaaa', font=('Arial', 8))
+        self._guide_nav_label.pack(side='left', expand=True)
+        self._guide_nav_next_btn = tk.Button(
+            guide_nav_bar, text='▼', bg='#2a2a4e', fg='white',
+            relief='flat', font=('Arial', 10, 'bold'),
+            activebackground='#444466', activeforeground='white',
+            command=self._guide_nav_next, width=3)
+        self._guide_nav_next_btn.pack(side='right', padx=4)
+
+        self.guide_canvas = tk.Label(self.guide_display, bg='#1a1a2e')
+        self.guide_canvas.pack(fill='both', expand=True)
+        self.guide_display.withdraw()  # 啟動時隱藏
+
+        # 攻略導覽狀態
+        self._guide_nav_rom_name = ''
+        self._guide_nav_ids      = []
+        self._guide_nav_index    = 0
+
+        self.root.bind('<Configure>', self._on_main_move)
+        self._start_position_polling()
+        self.root.protocol('WM_DELETE_WINDOW', self.on_close)
+
+        # ── 畫面穩定自動翻譯 ──
+        self._stable_prev_img   = None
+        self._stable_count      = 0
+        self._stable_last_hash  = ''
+        self._auto_trans_job    = None
+
+        # 視窗位置快取（避免每次 polling 都呼叫 EnumWindows 與 geometry）
+        self._mesen_cache_rect  = None   # (left,top,right,bottom) 上次找到的位置
+        self._mesen_cache_title = ''     # 快取時對應的 target title
+        self._mesen_cache_ts    = 0.0    # 快取時間戳
+        self._last_disp_geom    = ''     # 上次設定的翻譯視窗 geometry
+        self._last_guide_geom   = ''     # 上次設定的攻略視窗 geometry
+        _MESEN_CACHE_TTL        = 0.5    # 快取有效期（秒），與 polling 間隔一致
+        # 若 config 記錄為啟用，啟動輪詢
+        # 自動翻譯不儲存，啟動時不自動開啟
+
+        # ── 場次錄製實例變數 ──
+        self._session_id          = None
+        self._session_start_time  = 0.0
+        self._session_elapsed_job = None
+        self._session_seq         = 0
+        self._session_game_name   = ''
+        self._session_dir         = ''
+        self._session_running     = False
+        self._session_capture_job = None
+        self._session_prev_gray   = None
+        self._session_stable_cnt  = 0
+        self._session_last_hash   = ''
+        self._playback_window     = None
+        self._playback_job        = None
+        self._playback_seq        = 0
+        self._playback_last_trans = None
+        self._playback_auto_open_job = None
+
+        # ── 請求佇列 worker thread ──
+        self._worker_thread = threading.Thread(
+            target=self._request_worker, daemon=True)
+        self._worker_thread.start()
+
+    # ══════════════════════════════════════════
+    # Tab 切換事件
+    # ══════════════════════════════════════════
+    def _on_tab_changed(self, event):
+        nb = event.widget
+        idx = nb.index('current')
+        if idx == 2:   # Tab 3 — 引擎配額
+            self._refresh_quota_table()
+        elif idx == 3: # Tab 4 — 歷史翻譯
+            self._t4_refresh_games()
+            self._t4_load_list()
+        elif idx == 4: # Tab 5 — 歷史攻略
+            self._t5_refresh_games()
+            self._t5_load_list()
+        elif idx == 5: # Tab 6 — 歷史錄製
+            self._t6_refresh_games()
+            self._t6_load_list()
+
+    def _refresh_quota_table(self):
+        """重新整理 Tab3 配額總覽表（Treeview 版）"""
+        global CURRENT_LANG
+        CURRENT_LANG = self.config.get('ui_lang', 'zh')
+        used_today = self.config.get('used_today', {})
+        no_quota   = S('quota_no_limit')
+        cur_eng    = self.engine_var.get()
+        cur_model  = self.model_var.get()
+
+        # 更新欄位標頭文字（切換語系後即時生效）
+        self.quota_table.heading('engine', text=S('th_engine'))
+        self.quota_table.heading('model',  text=S('th_model'))
+        self.quota_table.heading('used',   text=S('th_used'))
+        self.quota_table.heading('limit',  text=S('th_limit'))
+
+        # 清空舊資料
+        for row in self.quota_table.get_children():
+            self.quota_table.delete(row)
+
+        row_idx = 0
+        for eng in ENGINE_ORDER:
+            models = self._get_engine_models(eng)
+            for m in models:
+                used  = used_today.get(m, 0)
+                limit = MODEL_DAILY_LIMITS.get(m, 500)
+                rpm   = MODEL_RPM.get(m, '-')
+                limit_str = str(limit) if limit > 0 else no_quota
+                rpm_str   = str(rpm)   if rpm != '-' else '-'
+
+                # 決定 tag
+                is_current  = (eng == cur_eng and m == cur_model)
+                is_no_quota = (limit <= 0)
+                if is_current:
+                    tags = ('current',)
+                elif is_no_quota:
+                    tags = ('no_quota',)
+                else:
+                    tags = ('odd',) if row_idx % 2 == 0 else ('even',)
+
+                self.quota_table.insert('', 'end', iid=f'{eng}|{m}',
+                    values=(eng, m, used, limit_str, rpm_str),
+                    tags=tags)
+                row_idx += 1
+
+            # 引擎間空白分隔行
+            self.quota_table.insert('', 'end', iid=f'sep_{eng}',
+                values=('', '', '', '', ''), tags=('sep',))
+
+    # ══════════════════════════════════════════
+    # Tab 4 — 歷史翻譯：內部方法
+    # ══════════════════════════════════════════
+
+    # ══════════════════════════════════════════
+    # ══════════════════════════════════════════
+    # 選單列方法
+    # ══════════════════════════════════════════
+
+    def _switch_lang(self, lang: str):
+        if self.config.get('ui_lang') == lang:
+            return
+        self.config['ui_lang'] = lang
+        save_config(self.config)
+        from tkinter import messagebox
+        if lang == 'zh':
+            messagebox.showinfo('LangForge', '介面語言已設為中文，重新啟動後生效。')
+        else:
+            messagebox.showinfo('LangForge', 'UI language set to English. Please restart to apply.')
+
+
+    # ══════════════════════════════════════════
+    # 場次錄製
+    # ══════════════════════════════════════════
+    def _start_session(self):
+        import sqlite3, hashlib
+        game_name = self.title_var.get().strip() or 'unknown'
+        platform  = self.platform_var.get().strip()
+        ts        = time.strftime('%Y%m%d_%H%M%S')
+        safe_name = re.sub(r'[\\/:*?"<>|]', '_', game_name)
+        session_dir = os.path.join(self.LOG_DIR, 'sessions', f'{ts}_{safe_name}')
+        os.makedirs(session_dir, exist_ok=True)
+
+        conn = sqlite3.connect(self.DB_PATH)
+        cur = conn.execute(
+            'INSERT INTO sessions (game_name, platform, started_at) VALUES (?,?,?)',
+            (game_name, platform, time.strftime('%Y-%m-%d %H:%M:%S')))
+        session_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+
+        self._session_id         = session_id
+        self._session_seq        = 0
+        self._session_game_name  = game_name
+        self._session_dir        = session_dir
+        self._session_running    = True
+        self._session_prev_gray  = None
+        self._session_stable_cnt = 0
+        self._session_last_hash  = ''
+
+        self._btn_session_start.config(state='disabled')
+        self._btn_session_stop.config(state='normal')
+        self._session_status_label.config(
+            text=S('session_recording'), foreground='red')
+
+        self._playback_auto_open_job = self.root.after(
+            PLAYBACK_DELAY_SECONDS * 1000, self._open_playback_window)
+        self._session_start_time = time.time()
+        self._session_elapsed_job = None
+        self._session_elapsed_tick()
+        self._session_capture_loop()
+        log(f'場次開始: session_id={session_id}, dir={session_dir}')
+
+    def _stop_session(self):
+        import sqlite3
+        self._session_running = False
+        if self._session_capture_job:
+            self.root.after_cancel(self._session_capture_job)
+            self._session_capture_job = None
+        if self._playback_auto_open_job:
+            self.root.after_cancel(self._playback_auto_open_job)
+            self._playback_auto_open_job = None
+
+        if self._session_id:
+            conn = sqlite3.connect(self.DB_PATH)
+            conn.execute(
+                'UPDATE sessions SET ended_at=?, total_frames=? WHERE id=?',
+                (time.strftime('%Y-%m-%d %H:%M:%S'),
+                 self._session_seq, self._session_id))
+            conn.commit()
+            conn.close()
+
+        if getattr(self, '_session_elapsed_job', None):
+            self.root.after_cancel(self._session_elapsed_job)
+            self._session_elapsed_job = None
+        self._btn_session_start.config(state='normal')
+        self._btn_session_stop.config(state='disabled')
+        self._session_status_label.config(
+            text=S('session_idle'), foreground='gray')
+        log(f'場次結束: session_id={self._session_id}, 共 {self._session_seq} 幀')
+
+    def _session_elapsed_tick(self):
+        """每秒更新錄製計時，只顯示必要的時間單位。"""
+        if not self._session_running:
+            return
+        elapsed = int(time.time() - self._session_start_time)
+        h = elapsed // 3600
+        m = (elapsed % 3600) // 60
+        s = elapsed % 60
+        if h > 0:
+            t_str = f'{h}時{m:02d}分{s:02d}秒'
+        elif m > 0:
+            t_str = f'{m}分{s:02d}秒'
+        else:
+            t_str = f'{s}秒'
+        self._session_status_label.config(
+            text=f'錄製中  {t_str}', foreground='red')
+        self._session_elapsed_job = self.root.after(1000, self._session_elapsed_tick)
+
+    def _session_capture_loop(self):
+        if not self._session_running:
+            return
+        try:
+            image_pil = self._try_capture()
+            if image_pil is not None:
+                import hashlib
+                from PIL import ImageChops
+                self._session_seq += 1
+                ts_str   = time.strftime('%Y-%m-%d %H:%M:%S')
+                filename = f'{self._session_seq:06d}_{time.strftime("%H%M%S")}.jpg'
+                img_path = os.path.join(self._session_dir, filename)
+                image_pil.save(img_path, format='JPEG', quality=85)
+
+                import sqlite3
+                rel_path = os.path.relpath(img_path, self.LOG_DIR)
+                conn = sqlite3.connect(self.DB_PATH)
+                conn.execute(
+                    'INSERT INTO frames (session_id, seq, ts, img_path) VALUES (?,?,?,?)',
+                    (self._session_id, self._session_seq, ts_str, rel_path))
+                conn.commit()
+                conn.close()
+
+                gray = image_pil.convert('L')
+                if self._session_prev_gray is not None:
+                    diff = ImageChops.difference(gray, self._session_prev_gray)
+                    pixels = list(getattr(diff, "get_flattened_data", diff.getdata)())
+                    avg_diff = sum(pixels) / len(pixels) if pixels else 999
+                    if avg_diff < SESSION_STABLE_DIFF:
+                        self._session_stable_cnt += 1
+                    else:
+                        self._session_stable_cnt = 0
+                    if self._session_stable_cnt >= SESSION_STABLE_COUNT:
+                        img_hash = hashlib.md5(image_pil.tobytes()).hexdigest()
+                        if img_hash != self._session_last_hash:
+                            self._session_last_hash  = img_hash
+                            self._session_stable_cnt = 0
+                            seq_to_translate = self._session_seq
+                            threading.Thread(
+                                target=self._session_translate,
+                                args=(image_pil, seq_to_translate),
+                                daemon=True).start()
+                self._session_prev_gray = gray
+        except Exception as e:
+            log(f'場次截圖失敗: {e}')
+        self._session_capture_job = self.root.after(
+            SESSION_CAPTURE_INTERVAL_MS, self._session_capture_loop)
+
+    def _session_translate(self, image_pil, seq):
+        """場次錄製翻譯：支援雲端/本地OLLAMA/OCR三種模式"""
+        import sqlite3
+        try:
+            mode     = self.engine_mode_var.get()
+            src_lang = self.src_lang_var.get()
+            tgt_lang = self.tgt_lang_var.get()
+
+            if mode == 'ocr':
+                # ── OCR 模式：EasyOCR + Google 翻譯 ──
+                import easyocr, numpy as np
+                ocr_langs_str = LANG_TO_BCP47.get(src_lang, 'ja').split('-')[0]
+                ocr_langs = [ocr_langs_str]
+                if not hasattr(self, '_easyocr_reader') or self._easyocr_langs != ocr_langs:
+                    import warnings, logging
+                    warnings.filterwarnings('ignore')
+                    logging.getLogger('easyocr').setLevel(logging.ERROR)
+                    self._easyocr_reader = easyocr.Reader(ocr_langs, gpu=False, verbose=False)
+                    self._easyocr_langs  = ocr_langs
+                img_np = np.array(image_pil)
+                ocr_results = self._easyocr_reader.readtext(img_np)
+                ocr_results = [r for r in ocr_results if r[2] >= 0.1]
+                if not ocr_results:
+                    return
+                src_bcp = LANG_TO_BCP47.get(src_lang, 'auto')
+                tgt_bcp = LANG_TO_BCP47.get(tgt_lang, 'zh-TW')
+                orig_w, orig_h = image_pil.width, image_pil.height
+                result = []
+                for bbox, text, conf in ocr_results:
+                    tw = _google_translate(text, src_bcp, tgt_bcp)
+                    xs = [p[0] for p in bbox]; ys = [p[1] for p in bbox]
+                    result.append({'tw': tw,
+                                   'x': round(min(xs)/orig_w, 4),
+                                   'y': round(min(ys)/orig_h, 4),
+                                   'w': round((max(xs)-min(xs))/orig_w, 4),
+                                   'h': round((max(ys)-min(ys))/orig_h, 4)})
+                model = 'OCR+GoogleTranslate'
+
+            elif mode == 'local':
+                # ── OLLAMA 本地模式 ──
+                ollama_model = self.ollama_model_var.get()
+                if not ollama_model:
+                    return
+                prompt = build_translate_prompt(src_lang, tgt_lang)
+                result = call_ollama(ollama_model, image_pil, prompt,
+                                     timeout=int(self.ollama_timeout_var.get() or OLLAMA_TIMEOUT))
+                model = ollama_model
+
+            else:
+                # ── 雲端引擎 ──
+                eng     = self.engine_var.get()
+                api_key = self.api_entry.get().strip()
+                model   = self.model_var.get()
+                prompt  = build_translate_prompt(src_lang, tgt_lang)
+                caller  = ENGINE_CALLERS[eng]
+                result  = caller(api_key, model, image_pil, prompt)
+
+            if isinstance(result, list) and result:
+                trans_json = json.dumps(result, ensure_ascii=False)
+                conn = sqlite3.connect(self.DB_PATH)
+                conn.execute(
+                    'UPDATE frames SET translation=? WHERE session_id=? AND seq=?',
+                    (trans_json, self._session_id, seq))
+                conn.commit()
+                conn.close()
+                log(f'場次翻譯回寫: session={self._session_id}, seq={seq}')
+                if mode not in ('local', 'ocr'):
+                    def _update_quota(m=model):
+                        self.config['used_today'][m] = self.config['used_today'].get(m, 0) + 1
+                        save_config(self.config)
+                        self.root.after(0, self._refresh_quota)
+                    self.root.after(0, _update_quota)
+        except Exception as e:
+            log(f'場次翻譯失敗: seq={seq}, {e}')
+
+    def _open_playback_window(self):
+        if self._playback_window and self._playback_window.winfo_exists():
+            self._playback_window.lift()
+            return
+        if not self._session_id:
+            return
+
+        self._playback_window = tk.Toplevel(self.root)
+        self._playback_window.title(
+            f'🎬 LangForge 延遲播放 — {self._session_game_name}')
+        self._playback_window.configure(bg='black')
+        self._playback_window.attributes('-topmost', True)
+        _load_app_icon(self._playback_window)
+
+        scr_w   = self.root.winfo_screenwidth()
+        scr_h   = self.root.winfo_screenheight()
+        saved_x = self.config.get('playback_x', 10)
+        saved_y = self.config.get('playback_y', scr_h - 700)
+        self._playback_window.geometry(
+            f'{PLAYBACK_DISPLAY_WIDTH}x600+{saved_x}+{saved_y}')
+
+        def _on_move(e=None):
+            self.config['playback_x'] = self._playback_window.winfo_x()
+            self.config['playback_y'] = self._playback_window.winfo_y()
+            save_config(self.config)
+        self._playback_window.bind('<Configure>', _on_move)
+
+        info_frame = tk.Frame(self._playback_window, bg='#1a1a1a')
+        info_frame.pack(fill='x')
+        self._pb_info_label = tk.Label(
+            info_frame, text='', fg='#aaaaaa', bg='#1a1a1a',
+            font=('Arial', 8))
+        self._pb_info_label.pack(side='left', padx=8, pady=2)
+
+        btn_frame_pb = tk.Frame(self._playback_window, bg='#1a1a1a')
+        btn_frame_pb.pack(side='bottom', fill='x')
+        tk.Button(btn_frame_pb, text=S('btn_stop_playback'),
+                  command=self._stop_playback,
+                  bg='#333', fg='white', relief='flat').pack(
+            pady=4, padx=8, fill='x')
+
+        self._pb_canvas = tk.Label(self._playback_window, bg='black')
+        self._pb_canvas.pack(fill='both', expand=True)
+
+        self._btn_playback_open.config(state='normal')
+        delay_frames = int(PLAYBACK_DELAY_SECONDS / (SESSION_CAPTURE_INTERVAL_MS / 1000))
+        if self._session_seq > delay_frames:
+            # 錄製時間充足：從延遲點開始
+            self._playback_seq = self._session_seq - delay_frames
+        else:
+            # 錄製時間不足 10 分鐘：從第 1 幀開始播放所有已錄內容
+            self._playback_seq = 1
+        self._playback_last_trans = None
+        self._playback_loop()
+
+    def _playback_loop(self):
+        if not self._playback_window or not self._playback_window.winfo_exists():
+            return
+        delay_frames = int(PLAYBACK_DELAY_SECONDS / (SESSION_CAPTURE_INTERVAL_MS / 1000))
+        if self._session_running:
+            # 錄製中：保持延遲，等錄製端超前足夠幀數才播
+            if self._playback_seq > self._session_seq - delay_frames:
+                self._playback_job = self.root.after(PLAYBACK_FPS_MS, self._playback_loop)
+                return
+        else:
+            # 場次已結束：播到最後一幀就停止
+            if self._playback_seq > self._session_seq:
+                self._pb_info_label.config(text='播放完畢')
+                return
+
+        import sqlite3
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            row = conn.execute(
+                'SELECT ts, img_path, translation FROM frames '                'WHERE session_id=? AND seq=?',
+                (self._session_id, self._playback_seq)).fetchone()
+            conn.close()
+
+            if row:
+                ts_str, img_path, trans_json = row
+                full_path = os.path.join(self.LOG_DIR, img_path)
+                image_pil = Image.open(full_path)
+                orig_w, orig_h = image_pil.size
+                pb_w   = PLAYBACK_DISPLAY_WIDTH_LARGE if orig_w > 1800 else PLAYBACK_DISPLAY_WIDTH
+                scale  = pb_w / orig_w
+                pb_h   = int(orig_h * scale)
+                image_pil = image_pil.resize((pb_w, pb_h), Image.LANCZOS)
+
+                if trans_json:
+                    self._playback_last_trans = json.loads(trans_json)
+
+                if self._playback_last_trans:
+                    out_img = self._render_to_image(
+                        self._playback_last_trans, image_pil, pb_w, pb_h)
+                else:
+                    out_img = image_pil
+
+                tk_img = ImageTk.PhotoImage(out_img)
+                self._pb_canvas.config(image=tk_img)
+                self._pb_canvas._img_ref = tk_img
+                self._playback_window.geometry(f'{pb_w}x{pb_h + 50}')
+
+                lag_secs = self._session_seq - self._playback_seq
+                lag_min  = lag_secs // 2 // 60
+                lag_sec  = (lag_secs // 2) % 60
+                self._pb_info_label.config(
+                    text=f'{ts_str}  落後 {lag_min:02d}:{lag_sec:02d}')
+
+            self._playback_seq += 1
+            # 同步進度條（Tab6 回放模式）
+            if hasattr(self, '_pb_progress_var'):
+                try: self._pb_progress_var.set(self._playback_seq)
+                except Exception: pass
+        except Exception as e:
+            log(f'播放失敗: seq={self._playback_seq}, {e}')
+            self._playback_seq += 1
+
+        # 暫停中不繼續排下一幀
+        if getattr(self, '_pb_paused', False):
+            return
+        self._playback_job = self.root.after(PLAYBACK_FPS_MS, self._playback_loop)
+
+    def _stop_playback(self):
+        if self._playback_job:
+            self.root.after_cancel(self._playback_job)
+            self._playback_job = None
+        if self._playback_window and self._playback_window.winfo_exists():
+            self._playback_window.destroy()
+        self._playback_window = None
+        log('播放已停止')
+    # ══════════════════════════════════════════
+    # Tab6 — 歷史錄製
+    # ══════════════════════════════════════════
+    def _t6_refresh_games(self):
+        """從 DB 撈 sessions 的不重複遊戲名稱，更新篩選下拉。"""
+        import sqlite3
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            rows = conn.execute(
+                'SELECT DISTINCT game_name FROM sessions ORDER BY game_name').fetchall()
+            conn.close()
+            games = [S('all_games')] + [r[0] for r in rows]
+            self.t6_game_combo['values'] = games
+            if self.t6_game_var.get() not in games:
+                self.t6_game_var.set(S('all_games'))
+        except Exception as e:
+            log(f'[Tab6] refresh games 失敗: {e}')
+
+    def _t6_load_list(self):
+        """依篩選條件載入 sessions 清單至 Treeview。"""
+        import sqlite3
+        self.t6_tree.delete(*self.t6_tree.get_children())
+        try:
+            conn  = sqlite3.connect(self.DB_PATH)
+            game  = self.t6_game_var.get()
+            if game == S('all_games'):
+                rows = conn.execute(
+                    'SELECT id, game_name, started_at, total_frames, platform, dir_size_kb '                    'FROM sessions ORDER BY started_at DESC').fetchall()
+            else:
+                rows = conn.execute(
+                    'SELECT id, game_name, started_at, total_frames, platform, dir_size_kb '                    'FROM sessions WHERE game_name=? ORDER BY started_at DESC',
+                    (game,)).fetchall()
+            conn.close()
+            for r in rows:
+                sid, gname, started, frames, plat, size_kb = r
+                size_str = f'{size_kb/1024:.1f} MB' if (size_kb or 0) >= 1024 else f'{size_kb or 0} KB'
+                self.t6_tree.insert('', 'end', iid=str(sid),
+                    values=(gname, started, frames or 0, plat or '', size_str))
+        except Exception as e:
+            log(f'[Tab6] load list 失敗: {e}')
+
+    def _t6_on_select(self, event=None):
+        """點選場次：顯示第一幀縮圖與資訊。"""
+        import sqlite3
+        sel = self.t6_tree.selection()
+        if not sel:
+            return
+        sid = int(sel[0])
+        self._t6_current_session_id = sid
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            row = conn.execute(
+                'SELECT img_path, ts FROM frames WHERE session_id=? ORDER BY seq ASC LIMIT 1',
+                (sid,)).fetchone()
+            info = conn.execute(
+                'SELECT game_name, started_at, ended_at, total_frames, platform '                'FROM sessions WHERE id=?', (sid,)).fetchone()
+            conn.close()
+
+            # 資訊標籤
+            if info:
+                gname, started, ended, frames, plat = info
+                ended_str = ended or '錄製中' if not ended else ended
+                self._t6_info_label.config(
+                    text=f'{gname}  {started} → {ended_str}  共 {frames or 0} 幀  {plat or ""}',
+                    foreground='steelblue')
+
+            # 縮圖
+            if row:
+                full_path = os.path.join(self.LOG_DIR, row[0])
+                try:
+                    img = Image.open(full_path).convert('RGB')
+                    # 縮放至適合顯示
+                    label_w = max(self.t6_thumb_label.winfo_width(), 400)
+                    label_h = max(self.root.winfo_height() - 350, 100)
+                    scale   = min(label_w / img.width, label_h / img.height, 1.0)
+                    img     = img.resize(
+                        (int(img.width * scale), int(img.height * scale)), Image.LANCZOS)
+                    self._t6_thumb_img = ImageTk.PhotoImage(img)
+                    self.t6_thumb_label.config(image=self._t6_thumb_img)
+                except Exception:
+                    self.t6_thumb_label.config(image='')
+
+            self._btn_t6_replay.config(state='normal')
+        except Exception as e:
+            log(f'[Tab6] on_select 失敗: {e}')
+
+    def _t6_delete_session(self):
+        """刪除選取的場次（DB 紀錄 + 截圖目錄）。"""
+        import sqlite3
+        from tkinter import messagebox
+        sel = self.t6_tree.selection()
+        if not sel:
+            self._t6_info_label.config(
+                text=S('session_no_select'), foreground='red')
+            return
+        sid = int(sel[0])
+        row = self.t6_tree.item(sel[0], 'values')
+        game_name = row[0] if row else str(sid)
+        if not messagebox.askyesno(
+                '確認刪除',
+                f'刪除場次「{game_name}」及所有截圖？此操作不可復原。'):
+            return
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            # 找截圖目錄
+            first = conn.execute(
+                'SELECT img_path FROM frames WHERE session_id=? LIMIT 1',
+                (sid,)).fetchone()
+            conn.execute('DELETE FROM frames WHERE session_id=?', (sid,))
+            conn.execute('DELETE FROM sessions WHERE id=?', (sid,))
+            conn.commit()
+            conn.close()
+            # 刪除截圖目錄
+            if first:
+                img_dir = os.path.dirname(
+                    os.path.join(self.LOG_DIR, first[0]))
+                if os.path.isdir(img_dir):
+                    import shutil
+                    shutil.rmtree(img_dir, ignore_errors=True)
+                    # 若父目錄（sessions/）已空，一併移除
+                    parent_dir = os.path.dirname(img_dir)
+                    if os.path.isdir(parent_dir) and not os.listdir(parent_dir):
+                        os.rmdir(parent_dir)
+            log(f'[Tab6] 已刪除場次 {sid}')
+            self.t6_thumb_label.config(image='')
+            self._t6_info_label.config(text='', foreground='gray')
+            self._btn_t6_replay.config(state='disabled')
+            self._t6_load_list()
+            self._t6_refresh_games()
+        except Exception as e:
+            log(f'[Tab6] delete 失敗: {e}')
+
+    def _t6_replay_session(self):
+        """回放選取的場次：開啟播放視窗並以 DB 資料驅動。"""
+        import sqlite3
+        sid = self._t6_current_session_id
+        if not sid:
+            return
+
+        # 若播放視窗已存在先關閉
+        if self._playback_window and self._playback_window.winfo_exists():
+            self._stop_playback()
+
+        # 取場次資訊
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            info = conn.execute(
+                'SELECT game_name, total_frames FROM sessions WHERE id=?',
+                (sid,)).fetchone()
+            conn.close()
+        except Exception as e:
+            log(f'[Tab6] replay 取資訊失敗: {e}')
+            return
+
+        if not info:
+            return
+        game_name, total_frames = info
+
+        # 建立播放視窗
+        self._playback_window = tk.Toplevel(self.root)
+        self._playback_window.title(f'🎬 回放 — {game_name}')
+        self._playback_window.configure(bg='black')
+        self._playback_window.attributes('-topmost', True)
+        _load_app_icon(self._playback_window)
+
+        scr_w   = self.root.winfo_screenwidth()
+        scr_h   = self.root.winfo_screenheight()
+        saved_x = self.config.get('playback_x', 10)
+        saved_y = self.config.get('playback_y', scr_h - 700)
+        self._playback_window.geometry(
+            f'{PLAYBACK_DISPLAY_WIDTH}x620+{saved_x}+{saved_y}')
+
+        info_frame = tk.Frame(self._playback_window, bg='#1a1a1a')
+        info_frame.pack(fill='x')
+        self._pb_info_label = tk.Label(
+            info_frame, text='', fg='#aaaaaa', bg='#1a1a1a', font=('Arial', 8))
+        self._pb_info_label.pack(side='left', padx=8, pady=2)
+
+        # 進度列
+        pb_prog_frame = tk.Frame(self._playback_window, bg='#1a1a1a')
+        pb_prog_frame.pack(fill='x', padx=8)
+        self._pb_progress_var = tk.DoubleVar(value=0)
+        self._pb_scale = tk.Scale(
+            pb_prog_frame, variable=self._pb_progress_var,
+            from_=1, to=max(1, total_frames),
+            orient='horizontal', bg='#1a1a1a', fg='white',
+            troughcolor='#333', highlightthickness=0,
+            command=lambda v: self._t6_seek(int(float(v))))
+        self._pb_scale.pack(fill='x')
+
+        btn_frame_pb = tk.Frame(self._playback_window, bg='#1a1a1a')
+        btn_frame_pb.pack(side='bottom', fill='x')
+        # 播放/暫停 + 停止
+        self._pb_paused    = False
+        self._pb_pause_btn = tk.Button(
+            btn_frame_pb, text='⏸ 暫停',
+            command=self._t6_toggle_pause,
+            bg='#333', fg='white', relief='flat', width=10)
+        self._pb_pause_btn.pack(side='left', pady=4, padx=(8, 4))
+        tk.Button(btn_frame_pb, text=S('btn_stop_playback'),
+                  command=self._stop_playback,
+                  bg='#333', fg='white', relief='flat').pack(
+            side='left', pady=4, padx=4, fill='x', expand=True)
+
+        self._pb_canvas = tk.Label(self._playback_window, bg='black')
+        self._pb_canvas.pack(fill='both', expand=True)
+
+        # 設定回放狀態（借用現有播放機制，session_running=False → 播到底停止）
+        self._session_id        = sid
+        self._session_seq       = total_frames
+        self._session_game_name = game_name
+        self._session_running   = False
+        self._playback_seq      = 1
+        self._playback_last_trans = None
+        self._playback_job      = None
+        self._playback_loop()
+
+    def _t6_seek(self, seq: int):
+        """拖動進度條跳到指定幀。"""
+        if self._playback_job:
+            self.root.after_cancel(self._playback_job)
+            self._playback_job = None
+        self._playback_seq = max(1, seq)
+        if not self._pb_paused:
+            self._playback_loop()
+
+    def _t6_toggle_pause(self):
+        """播放 / 暫停切換。"""
+        self._pb_paused = not self._pb_paused
+        if hasattr(self, '_pb_pause_btn') and self._pb_pause_btn.winfo_exists():
+            self._pb_pause_btn.config(
+                text='▶ 繼續' if self._pb_paused else '⏸ 暫停')
+        if not self._pb_paused:
+            if self._playback_job:
+                self.root.after_cancel(self._playback_job)
+            self._playback_loop()
+        else:
+            if self._playback_job:
+                self.root.after_cancel(self._playback_job)
+                self._playback_job = None
+
+
+
+
+    def _render_to_image(self, segments, image_pil, out_w, out_h):
+        """將翻譯疊字合成到截圖上，回傳合成後的 PIL.Image（不更新 UI）。"""
+        from PIL import ImageDraw
+        PADDING = 8
+        try:
+            segments = _merge_segments(
+                [s for s in segments if isinstance(s, dict)],
+                x_thresh=0.05, y_thresh=0.02)
+            items = []
+            for s in segments:
+                tw = s.get('tw', '').replace('\n', ' ').replace('\r', '').strip()
+                if tw:
+                    sx = max(0.0, min(1.0, float(s.get('x', 0.05))))
+                    sy = max(0.0, min(1.0, float(s.get('y', 0.1))))
+                    items.append((tw, sx, sy))
+            if not items:
+                return image_pil
+
+            items.sort(key=lambda t: t[2])
+            tgt_lang_str = self.tgt_lang_var.get() if hasattr(self, 'tgt_lang_var') else 'Traditional Chinese(正體中文)'
+            font_size = 22
+            font = _get_font_for_lang(tgt_lang_str, font_size)
+            if font is None:
+                from PIL import ImageFont
+                font = ImageFont.load_default()
+
+            bg_rgba  = image_pil.convert('RGBA')
+            black_bg = Image.new('RGBA', (out_w, out_h), (0, 0, 0, 255))
+            blended  = Image.blend(black_bg, bg_rgba, alpha=0.30)
+            draw     = ImageDraw.Draw(blended)
+
+            line_h = font_size + 4
+            col_next_y = {}
+            for tw, sx, sy in items:
+                col    = int(sx * 8)
+                draw_x = max(PADDING, int(sx * out_w))
+                col_ny = col_next_y.get(col, PADDING)
+                raw_y  = int(sy * out_h)
+                draw_y = raw_y if raw_y >= col_ny else col_ny
+                if draw_y + line_h > out_h - PADDING:
+                    continue
+                draw_wrapped_text_safe(draw, tw, draw_x + 1, draw_y + 1, font, out_w, out_h, (0, 0, 0))
+                draw_wrapped_text_safe(draw, tw, draw_x,     draw_y,     font, out_w, out_h, 'white')
+                text_w = out_w - draw_x - PADDING
+                avg_cw = font_size * 0.55
+                cpl    = max(1, int(text_w / avg_cw))
+                nlines = max(1, -(-len(tw) // cpl))
+                col_next_y[col] = draw_y + nlines * line_h + 2
+
+            return blended.convert('RGB')
+        except Exception as e:
+            log(f'[render_to_image] 失敗: {e}')
+            return image_pil
+
+    def _open_platform_editor(self):
+        """開啟平台/模擬器編輯器視窗"""
+        global PLATFORMS, EMULATORS
+        win = tk.Toplevel(self.root)
+        win.title('平台編輯器')
+        win.geometry('640x480')
+        win.resizable(True, True)
+        _load_app_icon(win)
+
+        # ── 工作資料（獨立副本，儲存前不影響全域）──
+        import copy
+        work = {
+            'platform': copy.deepcopy(PLATFORMS),
+            'emulator': copy.deepcopy(EMULATORS),
+        }
+
+        # ── 頂部：模式選擇 ──
+        top = ttk.Frame(win, padding=6)
+        top.pack(fill='x')
+        mode_var = tk.StringVar(value='platform')
+        ttk.Radiobutton(top, text='遊戲平台 (platforms.json)',
+                        variable=mode_var, value='platform').pack(side='left')
+        ttk.Radiobutton(top, text='模擬器 (emulators.json)',
+                        variable=mode_var, value='emulator').pack(side='left', padx=(12, 0))
+
+        # ── 中段：左欄（主類別）+ 右欄（平台清單）──
+        mid = ttk.Frame(win, padding=(6, 0, 6, 0))
+        mid.pack(fill='both', expand=True)
+
+        # 左欄
+        left = ttk.LabelFrame(mid, text='主類別', padding=4)
+        left.pack(side='left', fill='y', padx=(0, 4))
+        cat_lb = tk.Listbox(left, width=18, selectmode='single', exportselection=False)
+        cat_lb.pack(fill='both', expand=True)
+        cat_btn_row = ttk.Frame(left)
+        cat_btn_row.pack(fill='x', pady=(4, 0))
+        ttk.Button(cat_btn_row, text='新增', width=6,
+                   command=lambda: _add_cat()).pack(side='left')
+        ttk.Button(cat_btn_row, text='改名', width=6,
+                   command=lambda: _rename_cat()).pack(side='left', padx=2)
+        ttk.Button(cat_btn_row, text='刪除', width=6,
+                   command=lambda: _del_cat()).pack(side='left')
+
+        # 右欄
+        right = ttk.LabelFrame(mid, text='平台', padding=4)
+        right.pack(side='left', fill='both', expand=True)
+        plat_lb = tk.Listbox(right, selectmode='single', exportselection=False)
+        plat_lb.pack(fill='both', expand=True)
+        plat_btn_row = ttk.Frame(right)
+        plat_btn_row.pack(fill='x', pady=(4, 0))
+        ttk.Button(plat_btn_row, text='新增', width=6,
+                   command=lambda: _add_plat()).pack(side='left')
+        ttk.Button(plat_btn_row, text='改名', width=6,
+                   command=lambda: _rename_plat()).pack(side='left', padx=2)
+        ttk.Button(plat_btn_row, text='刪除', width=6,
+                   command=lambda: _del_plat()).pack(side='left')
+        ttk.Button(plat_btn_row, text='↑', width=3,
+                   command=lambda: _move_plat(-1)).pack(side='left', padx=(8, 0))
+        ttk.Button(plat_btn_row, text='↓', width=3,
+                   command=lambda: _move_plat(1)).pack(side='left', padx=2)
+
+        # ── 底部：儲存/關閉 ──
+        bot = ttk.Frame(win, padding=6)
+        bot.pack(fill='x', side='bottom')
+        status_lbl = ttk.Label(bot, text='', foreground='green', font=('Arial', 9))
+        status_lbl.pack(side='left')
+        ttk.Button(bot, text='關閉', command=win.destroy).pack(side='right')
+        ttk.Button(bot, text='儲存', command=lambda: _save()).pack(side='right', padx=(0, 6))
+
+        # ── 輔助函式 ──
+        def _data():
+            return work[mode_var.get()]
+
+        def _refresh_cats():
+            cat_lb.delete(0, 'end')
+            for c in _data().keys():
+                cat_lb.insert('end', c)
+            plat_lb.delete(0, 'end')
+
+        def _cur_cat():
+            sel = cat_lb.curselection()
+            return cat_lb.get(sel[0]) if sel else None
+
+        def _refresh_plats():
+            plat_lb.delete(0, 'end')
+            cat = _cur_cat()
+            if cat:
+                for p in _data().get(cat, []):
+                    plat_lb.insert('end', p)
+
+        def _cur_plat_idx():
+            sel = plat_lb.curselection()
+            return sel[0] if sel else None
+
+        def _ask(title, prompt, init=''):
+            d = tk.Toplevel(win)
+            d.title(title)
+            d.geometry('300x110')
+            d.grab_set()
+            ttk.Label(d, text=prompt, font=('Arial', 9)).pack(padx=10, pady=(10, 4))
+            var = tk.StringVar(value=init)
+            e = ttk.Entry(d, textvariable=var, width=30)
+            e.pack(padx=10)
+            e.focus_set()
+            result = [None]
+            def _ok(*_):
+                result[0] = var.get().strip()
+                d.destroy()
+            ttk.Button(d, text='確定', command=_ok).pack(pady=6)
+            e.bind('<Return>', _ok)
+            win.wait_window(d)
+            return result[0]
+
+        def _add_cat():
+            name = _ask('新增主類別', '主類別名稱:')
+            if name and name not in _data():
+                _data()[name] = []
+                _refresh_cats()
+
+        def _rename_cat():
+            cat = _cur_cat()
+            if not cat:
+                return
+            name = _ask('改名主類別', '新名稱:', init=cat)
+            if name and name != cat and name not in _data():
+                data = _data()
+                items = list(data.items())
+                idx = list(data.keys()).index(cat)
+                items[idx] = (name, items[idx][1])
+                work[mode_var.get()] = dict(items)
+                _refresh_cats()
+                cat_lb.selection_set(idx)
+                _refresh_plats()
+
+        def _del_cat():
+            cat = _cur_cat()
+            if not cat:
+                return
+            if tk.messagebox.askyesno('確認', f'刪除主類別「{cat}」及其所有平台？', parent=win):
+                del _data()[cat]
+                _refresh_cats()
+
+        def _add_plat():
+            cat = _cur_cat()
+            if not cat:
+                return
+            name = _ask('新增平台', '平台名稱:')
+            if name and name not in _data()[cat]:
+                _data()[cat].append(name)
+                _refresh_plats()
+
+        def _rename_plat():
+            cat = _cur_cat()
+            idx = _cur_plat_idx()
+            if cat is None or idx is None:
+                return
+            old = _data()[cat][idx]
+            name = _ask('改名平台', '新名稱:', init=old)
+            if name and name != old:
+                _data()[cat][idx] = name
+                _refresh_plats()
+                plat_lb.selection_set(idx)
+
+        def _del_plat():
+            cat = _cur_cat()
+            idx = _cur_plat_idx()
+            if cat is None or idx is None:
+                return
+            _data()[cat].pop(idx)
+            _refresh_plats()
+
+        def _move_plat(direction):
+            cat = _cur_cat()
+            idx = _cur_plat_idx()
+            if cat is None or idx is None:
+                return
+            lst = _data()[cat]
+            new_idx = idx + direction
+            if 0 <= new_idx < len(lst):
+                lst[idx], lst[new_idx] = lst[new_idx], lst[idx]
+                _refresh_plats()
+                plat_lb.selection_set(new_idx)
+
+        def _save():
+            global PLATFORMS, EMULATORS
+            import copy
+            try:
+                _save_platforms(copy.deepcopy(work['platform']))
+                _save_emulators(copy.deepcopy(work['emulator']))
+                PLATFORMS = work['platform']
+                EMULATORS = work['emulator']
+                # 重新整理 Tab1 平台下拉
+                self._on_platform_mode_change()
+                status_lbl.config(text='✓ 已儲存', foreground='green')
+                win.after(2000, lambda: status_lbl.config(text=''))
+                log('[PlatformEditor] 儲存完成')
+            except Exception as e:
+                status_lbl.config(text=f'儲存失敗: {e}', foreground='red')
+                log(f'[PlatformEditor] 儲存失敗: {e}')
+
+        # 模式切換時刷新
+        def _on_mode_change(*_):
+            _refresh_cats()
+        mode_var.trace_add('write', _on_mode_change)
+
+        # 主類別點選時刷新平台
+        cat_lb.bind('<<ListboxSelect>>', lambda e: _refresh_plats())
+
+        # 初始載入
+        _refresh_cats()
+
+    def _show_about(self):
+        import webbrowser
+        FB_URL = 'https://www.facebook.com/groups/2150940378645437'
+        win = tk.Toplevel(self.root)
+        win.title(S('menu_about'))
+        _load_app_icon(win)
+        win.resizable(False, False)
+        win.grab_set()
+        win.update_idletasks()
+        w, h = 460, 250
+        mx = self.root.winfo_x() + (self.root.winfo_width() - w) // 2
+        my = self.root.winfo_y() + (self.root.winfo_height() - h) // 2
+        win.geometry(f'{w}x{h}+{mx}+{my}')
+        ttk.Label(win, text='LangForge', font=('Arial', 14, 'bold')).pack(pady=(16, 4))
+        author  = ABOUT_AUTHOR  if ABOUT_AUTHOR  else '-'
+        license_ = ABOUT_LICENSE if ABOUT_LICENSE else '-'
+        is_zh = self.config.get('ui_lang', 'zh') == 'zh'
+        if is_zh:
+            info = f'版本:  {ABOUT_VERSION}\n作者:  {author}\n授權:  {license_}'
+        else:
+            info = f'Version:  {ABOUT_VERSION}\nAuthor:   {author}\nLicense:  {license_}'
+        ttk.Label(win, text=info, font=('Arial', 10), justify='left').pack(padx=20, pady=4)
+
+        # FB 社群連結
+        ttk.Separator(win, orient='horizontal').pack(fill='x', padx=20, pady=(6, 4))
+        gh_link = tk.Label(win, text=f'GitHub: {ABOUT_GITHUB}',
+                           font=('Arial', 9, 'underline'), fg='#333', cursor='hand2')
+        gh_link.pack(padx=20, anchor='w')
+        gh_link.bind('<Button-1>', lambda e: webbrowser.open(ABOUT_GITHUB))
+        fb_label = '官方社群：LangForge 官方社群 | AI遊戲翻譯工具 | AI Game Translator' if is_zh \
+                   else 'Community: LangForge Official | AI遊戲翻譯工具 | AI Game Translator'
+        fb_link = tk.Label(win, text=fb_label, font=('Arial', 9, 'underline'),
+                           fg='#1877f2', cursor='hand2')
+        fb_link.pack(padx=20, anchor='w')
+        fb_link.bind('<Button-1>', lambda e: webbrowser.open(FB_URL))
+
+        ttk.Button(win, text=S('btn_ok'),
+                   command=win.destroy, width=10).pack(pady=(8, 0))
+
+    # ══════════════════════════════════════════
+    # Tab 1 — 遊戲平台聯動
+    # ══════════════════════════════════════════
+
+    def _active_platform_data(self):
+        """依目前模式回傳 PLATFORMS 或 EMULATORS"""
+        return EMULATORS if self.platform_mode_var.get() == 'emulator' else PLATFORMS
+
+    def _on_platform_mode_change(self):
+        """模式切換（遊戲平台/模擬器）：重新載入主類別與平台下拉"""
+        data = self._active_platform_data()
+        cats = list(data.keys())
+        self.platform_category_combo['values'] = cats
+        cat = cats[0] if cats else ''
+        self.platform_category_var.set(cat)
+        plats = data.get(cat, [])
+        self.platform_combo['values'] = plats
+        self.platform_var.set(plats[0] if plats else '')
+        self.config['platform_mode'] = self.platform_mode_var.get()
+        self.config['platform_category'] = cat
+        self.config['platform'] = self.platform_var.get()
+        save_config(self.config)
+
+    def _on_platform_category_change(self, event=None):
+        """主類別切換：更新平台下拉並儲存設定"""
+        data = self._active_platform_data()
+        cat = self.platform_category_var.get()
+        plats = data.get(cat, [])
+        self.platform_combo['values'] = plats
+        self.platform_var.set(plats[0] if plats else '')
+        self.config['platform_category'] = cat
+        self.config['platform'] = self.platform_var.get()
+        save_config(self.config)
+
+    def _on_platform_change(self, event=None):
+        """平台切換：儲存設定"""
+        self.config['platform'] = self.platform_var.get()
+        save_config(self.config)
+
+    # ══════════════════════════════════════════
+    # Tab 4 — 修正平台聯動
+    # ══════════════════════════════════════════
+
+    def _on_t4_fix_mode_change(self):
+        """Tab4 修正平台：模式切換（遊戲平台/模擬器）更新主類別清單"""
+        data = PLATFORMS if self.t4_fix_mode_var.get() == 'platform' else EMULATORS
+        cats = list(data.keys())
+        self.t4_fix_category_combo['values'] = cats
+        self.t4_fix_category_var.set(cats[0] if cats else '')
+        self._on_t4_fix_category_change()
+
+    def _on_t4_fix_category_change(self, event=None):
+        """Tab4 修正平台：主類別切換更新平台下拉"""
+        data = PLATFORMS if self.t4_fix_mode_var.get() == 'platform' else EMULATORS
+        cat = self.t4_fix_category_var.get()
+        plats = data.get(cat, [])
+        self.t4_fix_platform_combo['values'] = plats
+        self.t4_fix_platform_var.set(plats[0] if plats else '')
+
+    def _t4_apply_platform(self):
+        """將選取紀錄的 rom_name 之所有紀錄更新 platform"""
+        import sqlite3
+        sel = self.t4_tree.selection()
+        if not sel:
+            log('[Tab4] 套用平台：未選取任何紀錄')
+            return
+        db_id = int(sel[0])
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            row = conn.execute(
+                'SELECT rom_name FROM translations WHERE id=?', (db_id,)).fetchone()
+            if not row:
+                conn.close()
+                return
+            rom_name = row[0]
+            new_platform = self.t4_fix_platform_var.get().strip()
+            conn.execute(
+                'UPDATE translations SET platform=? WHERE rom_name=?',
+                (new_platform, rom_name))
+            conn.commit()
+            affected = conn.execute(
+                'SELECT changes()').fetchone()[0]
+            conn.close()
+            log(f'[Tab4] 已將「{rom_name}」共 {affected} 筆紀錄的平台更新為「{new_platform}」')
+            self._t4_refresh_games()
+            self._t4_load_list()
+        except Exception as e:
+            log(f'[Tab4] 套用平台失敗: {e}')
+
+    def _t4_refresh_games(self):
+        """從 DB 撈不重複 rom_name、target_window、platform 更新篩選下拉"""
+        import sqlite3
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            game_rows = conn.execute(
+                'SELECT DISTINCT rom_name FROM translations ORDER BY rom_name').fetchall()
+            win_rows = conn.execute(
+                'SELECT DISTINCT target_window FROM translations ORDER BY target_window').fetchall()
+            plat_rows = conn.execute(
+                'SELECT DISTINCT platform FROM translations ORDER BY platform').fetchall()
+            conn.close()
+            game_names = [S('all_games')] + [r[0] for r in game_rows]
+            self.t4_game_combo['values'] = game_names
+            if self.t4_game_var.get() not in game_names:
+                self.t4_game_var.set(S('all_games'))
+            win_names = [S('all_windows')] + [r[0] for r in win_rows if r[0]]
+            self.t4_window_combo['values'] = win_names
+            if self.t4_window_var.get() not in win_names:
+                self.t4_window_var.set(S('all_windows'))
+            plat_names = [S('all_platforms')] + [r[0] for r in plat_rows if r[0]]
+            self.t4_platform_combo['values'] = plat_names
+            if self.t4_platform_var.get() not in plat_names:
+                self.t4_platform_var.set(S('all_platforms'))
+        except Exception as e:
+            log(f'[Tab4] 刷新遊戲清單失敗: {e}')
+
+    def _t4_load_list(self):
+        """依篩選遊戲＋目標視窗＋平台載入翻譯清單到 Treeview"""
+        import sqlite3
+        try:
+            game     = self.t4_game_var.get()
+            window   = self.t4_window_var.get()
+            platform = self.t4_platform_var.get()
+            conds, params = [], []
+            if game != S('all_games'):
+                conds.append('rom_name=?');      params.append(game)
+            if window != S('all_windows'):
+                conds.append('target_window=?'); params.append(window)
+            if platform != S('all_platforms'):
+                conds.append('platform=?');      params.append(platform)
+            where = ('WHERE ' + ' AND '.join(conds)) if conds else ''
+            conn = sqlite3.connect(self.DB_PATH)
+            rows = conn.execute(
+                f'SELECT id, timestamp, model, target_window, platform, rom_name FROM translations '
+                f'{where} ORDER BY id DESC', params).fetchall()
+            conn.close()
+            for item in self.t4_tree.get_children():
+                self.t4_tree.delete(item)
+            for row in rows:
+                self.t4_tree.insert('', 'end', iid=str(row[0]),
+                                    values=(row[5] or '', row[1],
+                                            row[3] or '', row[4] or ''))
+        except Exception as e:
+            log(f'[Tab4] 載入清單失敗: {e}')
+
+    def _t4_on_select(self, event):
+        """Treeview 點選：載入截圖 + 譯文"""
+        sel = self.t4_tree.selection()
+        if not sel:
+            return
+        db_id = int(sel[0])
+        self._t4_current_db_id = db_id
+        import sqlite3
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            row = conn.execute(
+                'SELECT lines, screenshot_path FROM translations WHERE id=?',
+                (db_id,)).fetchone()
+            conn.close()
+            if not row:
+                return
+            raw_lines, ss_rel = row
+
+            # 解析 segments，相容新格式 list[dict] / 舊格式 list[str]
+            parsed = json.loads(raw_lines)
+            segments = []
+            for i, item in enumerate(parsed):
+                if isinstance(item, str):
+                    # 舊格式：補預設座標
+                    segments.append({
+                        'tw': item,
+                        'x': 0.05, 'y': round(i * 0.09 + 0.05, 4),
+                        'w': 0.9,  'h': 0.08
+                    })
+                else:
+                    segments.append(item)
+
+            self._t4_current_segments = segments
+            self._t4_current_img_path = (
+                os.path.join(self.LOG_DIR, ss_rel) if ss_rel else None)
+
+            # 渲染截圖
+            self._t4_render()
+        except Exception as e:
+            log(f'[Tab4] 載入詳細失敗: {e}')
+
+    def _t4_toggle_overlay(self):
+        """切換疊圖/純圖模式並立即重新渲染"""
+        self.t4_overlay_var.set(not self.t4_overlay_var.get())
+        if self.t4_overlay_var.get():
+            self.t4_toggle_btn.config(text=S('btn_overlay'))
+        else:
+            self.t4_toggle_btn.config(text=S('btn_plain'))
+        self._t4_render()
+
+    def _t4_render(self):
+        """渲染截圖到 Tab4 圖片區（自適應頁籤寬度，疊圖或純圖）"""
+        if not self._t4_current_img_path:
+            return
+        try:
+            img = Image.open(self._t4_current_img_path).convert('RGB')
+        except Exception as e:
+            log(f'[Tab4] 開啟截圖失敗: {e}')
+            return
+
+        # 動態取得可用寬高
+        self.t4_img_label.update_idletasks()
+        avail_w = self.t4_img_label.winfo_width()
+        if avail_w < 100:
+            avail_w = self.root.winfo_width() - 32
+        MAX_W = max(avail_w, 200)
+
+        # 高度：從 img_label 頂部到主視窗底部的剩餘空間，最小 150
+        label_y = self.t4_img_label.winfo_rooty() - self.root.winfo_rooty()
+        avail_h = max(self.root.winfo_height() - label_y - 10, 150)
+
+        # 縮放維持比例，同時限制寬度與高度
+        orig_w, orig_h = img.width, img.height
+        scale = min(MAX_W / orig_w, avail_h / orig_h, 1.0)
+        out_w = int(orig_w * scale)
+        out_h = int(orig_h * scale)
+        img = img.resize((out_w, out_h), Image.LANCZOS)
+
+        if self.t4_overlay_var.get() and self._t4_current_segments:
+            # ── 疊圖：原圖 30% + 黑底 + 白字（與 render() 邏輯一致） ──
+            bg_rgba   = img.convert('RGBA')
+            black_bg  = Image.new('RGBA', (out_w, out_h), (0, 0, 0, 255))
+            blended   = Image.blend(black_bg, bg_rgba, alpha=0.30)
+            out_img   = blended.convert('RGB')
+            draw      = ImageDraw.Draw(out_img)
+
+            tgt_lang_str = self.tgt_lang_var.get() if hasattr(self, 'tgt_lang_var') \
+                           else 'Traditional Chinese(正體中文)'
+            font = _get_font_for_lang(tgt_lang_str, 16)
+
+            for s in self._t4_current_segments:
+                tw = s.get('tw', '').replace('\n', ' ').replace('\r', '').strip()
+                if not tw:
+                    continue
+                sx = float(s.get('x', 0.05))
+                sy = float(s.get('y', 0.1))
+                # 相容像素值
+                if sx > 1.0:
+                    sx = sx / orig_w
+                if sy > 1.0:
+                    sy = sy / orig_h
+                dx = max(PADDING, int(sx * out_w))
+                dy = max(PADDING, int(sy * out_h))
+                draw_wrapped_text_safe(draw, tw, dx + 1, dy + 1, font, out_w, out_h, (0, 0, 0))
+                draw_wrapped_text_safe(draw, tw, dx,     dy,     font, out_w, out_h, 'white')
+        else:
+            out_img = img
+
+        self._t4_tk_img = ImageTk.PhotoImage(out_img)
+        self.t4_img_label.config(image=self._t4_tk_img,
+                                 width=out_w, height=out_h)
+
+    def _t4_delete(self):
+        """刪除目前選取的翻譯紀錄並刷新清單"""
+        import sqlite3
+        if self._t4_current_db_id is None:
+            return
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            conn.execute('DELETE FROM translations WHERE id=?',
+                         (self._t4_current_db_id,))
+            conn.commit()
+            conn.close()
+            log(f'[Tab4] 已刪除翻譯紀錄 id={self._t4_current_db_id}')
+            # 清空暫存與 UI
+            self._t4_current_db_id     = None
+            self._t4_current_segments  = []
+            self._t4_current_img_path  = None
+            self.t4_img_label.config(image='', width=1, height=1)
+            self._t4_refresh_games()
+            self._t4_load_list()
+        except Exception as e:
+            log(f'[Tab4] 刪除失敗: {e}')
+
+    # ══════════════════════════════════════════
+    # Tab 5 — 歷史攻略：內部方法
+    # ══════════════════════════════════════════
+
+    def _t5_refresh_games(self):
+        """從 DB 撈不重複 rom_name 更新篩選下拉"""
+        import sqlite3
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            rows = conn.execute(
+                'SELECT DISTINCT rom_name FROM guides ORDER BY rom_name').fetchall()
+            conn.close()
+            names = [S('all_games')] + [r[0] for r in rows]
+            self.t5_game_combo['values'] = names
+            if self.t5_game_var.get() not in names:
+                self.t5_game_var.set(S('all_games'))
+        except Exception as e:
+            log(f'[Tab5] 刷新遊戲清單失敗: {e}')
+
+    def _t5_load_list(self):
+        """依篩選遊戲載入攻略清單到 Treeview"""
+        import sqlite3
+        try:
+            game = self.t5_game_var.get()
+            conn = sqlite3.connect(self.DB_PATH)
+            if game == S('all_games'):
+                rows = conn.execute(
+                    'SELECT id, timestamp, model, progress, rom_name FROM guides '
+                    'ORDER BY id DESC').fetchall()
+            else:
+                rows = conn.execute(
+                    'SELECT id, timestamp, model, progress, rom_name FROM guides '
+                    'WHERE rom_name=? ORDER BY id DESC', (game,)).fetchall()
+            conn.close()
+            for item in self.t5_tree.get_children():
+                self.t5_tree.delete(item)
+            for row in rows:
+                progress_short = (row[3] or '')[:20]
+                self.t5_tree.insert('', 'end', iid=str(row[0]),
+                                    values=(row[4] or '', row[1], progress_short))
+        except Exception as e:
+            log(f'[Tab5] 載入清單失敗: {e}')
+
+    def _t5_on_select(self, event):
+        """Treeview 點選：載入進度與攻略建議，並顯示縮圖"""
+        sel = self.t5_tree.selection()
+        if not sel:
+            return
+        db_id = int(sel[0])
+        self._t5_current_db_id = db_id
+        import sqlite3
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            row = conn.execute(
+                'SELECT progress, guide_content, screenshot_path FROM guides WHERE id=?',
+                (db_id,)).fetchone()
+            conn.close()
+            if not row:
+                return
+            progress, guide_json, ss_rel = row
+            try:
+                guide_list = json.loads(guide_json) if guide_json else []
+            except Exception:
+                guide_list = []
+
+            # 縮圖顯示
+            if ss_rel:
+                ss_path = os.path.join(self.LOG_DIR, ss_rel)
+                try:
+                    img = Image.open(ss_path).convert('RGB')
+                    img.thumbnail((128, 128), Image.LANCZOS)
+                    self._t5_guide_tk_img = ImageTk.PhotoImage(img)
+                    self.t5_guide_img_label.config(image=self._t5_guide_tk_img, text='')
+                except Exception:
+                    self._t5_guide_tk_img = None
+                    self.t5_guide_img_label.config(image='', text='(no img)')
+            else:
+                self._t5_guide_tk_img = None
+                self.t5_guide_img_label.config(image='', text='')
+
+            # 進度標籤
+            self.t5_progress_label.config(text=progress or '')
+
+            # 攻略建議（圓圈數字編號，條目間空一行）
+            CIRCLE_NUMS = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩']
+            self.t5_guide_text.config(state='normal')
+            self.t5_guide_text.delete('1.0', 'end')
+            for i, item in enumerate(guide_list):
+                num = CIRCLE_NUMS[i] if i < len(CIRCLE_NUMS) else f'{i + 1}.'
+                self.t5_guide_text.insert('end', f'{num} {item}\n\n')
+            self.t5_guide_text.config(state='disabled')
+        except Exception as e:
+            log(f'[Tab5] 載入詳細攻略失敗: {e}')
+
+    def _t5_delete(self):
+        """刪除目前選取的攻略紀錄並刷新清單"""
+        import sqlite3
+        if self._t5_current_db_id is None:
+            return
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            conn.execute('DELETE FROM guides WHERE id=?', (self._t5_current_db_id,))
+            conn.commit()
+            conn.close()
+            log(f'[Tab5] 已刪除攻略紀錄 id={self._t5_current_db_id}')
+            self._t5_current_db_id = None
+            self.t5_progress_label.config(text='')
+            self._t5_guide_tk_img = None
+            self.t5_guide_img_label.config(image='', text='')
+            self.t5_guide_text.config(state='normal')
+            self.t5_guide_text.delete('1.0', 'end')
+            self.t5_guide_text.config(state='disabled')
+            self._t5_refresh_games()
+            self._t5_load_list()
+        except Exception as e:
+            log(f'[Tab5] 刪除失敗: {e}')
+
+    # ══════════════════════════════════════════
+    # 畫面穩定自動翻譯
+    # ══════════════════════════════════════════
+
+    def _debounce_save_config(self):
+        """trace_add debounce：最後一次輸入完成 800ms 後才寫磁碟。"""
+        if self._save_config_after_id:
+            self.root.after_cancel(self._save_config_after_id)
+        self._save_config_after_id = self.root.after(800, self._flush_config)
+
+    def _flush_config(self):
+        self._save_config_after_id = None
+        self._save_auto_trans_config()
+        self._on_use_ollama_toggle()
+
+    def _save_auto_trans_config(self):
+        """將差異門檻與穩定次數即時儲存至 config"""
+        try:
+            self.config['stable_diff'] = int(self.stable_diff_var.get())
+        except (ValueError, AttributeError):
+            pass
+        try:
+            self.config['stable_count'] = int(self.stable_count_var.get())
+        except (ValueError, AttributeError):
+            pass
+        save_config(self.config)
+
+    def _on_auto_trans_toggle(self):
+        enabled = self.auto_trans_var.get()
+        # 自動翻譯狀態不儲存到 config
+        if enabled:
+            self.auto_trans_status.config(text=S('status_on'), foreground='green')
+            self._stable_count = 0
+            self._stable_prev_img = None
+            self._stable_last_hash = ''
+            self._position_polling_paused = True
+            self._stable_check_loop()
+            # 自動翻譯開啟時停用三個手動按鈕
+            for btn in ('btn_capture', 'btn_guide', 'btn_file'):
+                if hasattr(self, btn):
+                    getattr(self, btn).config(state='disabled')
+        else:
+            self.auto_trans_status.config(text=S('status_off'), foreground='gray')
+            self._position_polling_paused = False
+            if self._auto_trans_job:
+                self.root.after_cancel(self._auto_trans_job)
+                self._auto_trans_job = None
+            # 自動翻譯關閉時恢復三個手動按鈕
+            for btn in ('btn_capture', 'btn_guide', 'btn_file'):
+                if hasattr(self, btn):
+                    getattr(self, btn).config(state='normal')
+        # 同步 Tab1 自動擷取按鈕
+        self._sync_auto_cap_btn()
+        self._update_indicators()
+
+    def _sync_auto_cap_btn(self):
+        """依 auto_trans 狀態更新 Tab1 自動擷取按鈕"""
+        if not hasattr(self, 'auto_cap_btn'):
+            return
+        enabled = self.auto_trans_var.get()
+        self.auto_cap_btn.config(
+            text=S('btn_auto_cap_on') if enabled else S('btn_auto_cap_off'),
+            state='normal' if enabled else 'disabled')
+
+    def _on_auto_cap_btn(self):
+        """Tab1 停止自動擷取按鈕：與 Tab2 Checkbutton 效果相同"""
+        self.auto_trans_var.set(False)
+        self._on_auto_trans_toggle()
+
+    def _grab_window_hwnd(self, hwnd, crop_top=0):
+        """給定 hwnd，回傳擷取的 PIL Image（支援多螢幕 DPI 縮放）。
+        進程已設為 Per-Monitor DPI Aware，座標為實體像素，不需額外縮放。"""
+        # 取得 client 區域的實體像素座標
+        cr   = win32gui.GetClientRect(hwnd)
+        cp0  = win32gui.ClientToScreen(hwnd, (0, 0))
+        px1 = cp0[0]
+        py1 = cp0[1] + crop_top
+        px2 = cp0[0] + cr[2]
+        py2 = cp0[1] + cr[3]
+
+        # 防呆：視窗最小化或在螢幕外時座標可能無效
+        if px2 <= px1 or py2 <= py1:
+            raise ValueError(f'無效的擷取範圍 ({px1},{py1})-({px2},{py2})，視窗可能已最小化或移出螢幕')
+
+        # all_screens=True 讓 Pillow 抓整個虛擬桌面（含副螢幕）
+        return ImageGrab.grab(bbox=(px1, py1, px2, py2), all_screens=True).convert('RGB')
+
+    def _try_capture(self):
+        """重用 _window_capture_task 的擷取邏輯，回傳 PIL Image 或 None"""
+        try:
+            target = self.title_var.get().lower().strip()
+            if not target:
+                return None
+            hwnd = None
+            def _handler(h, _):
+                nonlocal hwnd
+                if target in win32gui.GetWindowText(h).lower():
+                    hwnd = h
+                    return False
+                return True
+            win32gui.EnumWindows(_handler, None)
+            if not hwnd:
+                return None
+            try:
+                crop_top = int(self.crop_top_var.get())
+            except ValueError:
+                crop_top = 0
+            if crop_top < 0:
+                crop_top = 0
+            return self._grab_window_hwnd(hwnd, crop_top)
+        except Exception:
+            return None
+
+
+    def _enqueue_task(self, task: dict) -> bool:
+        """將任務放入佇列，佇列滿時回傳 False 並顯示提示。"""
+        try:
+            _request_queue.put_nowait(task)
+            qsize = _request_queue.qsize()
+            log(f'任務已加入佇列 (目前 {qsize}/{REQUEST_QUEUE_MAXSIZE})')
+            self._update_queue_label(qsize)
+            if qsize >= REQUEST_QUEUE_MAXSIZE:
+                self._set_status(S('status_queue_full'), 'orange')
+            return True
+        except queue.Full:
+            self._set_status(S('status_queue_full'), 'orange')
+            log('佇列已滿，本次請求丟棄')
+            return False
+
+    def _request_worker(self):
+        """常駐 worker thread：依序從佇列取出任務執行。"""
+        while True:
+            task = _request_queue.get()
+            if task is None:
+                _request_queue.task_done()
+                break
+            try:
+                t = task['type']
+                if t == 'translate':
+                    self._do_translate(
+                        task['image_pil'], task['source'], task['win_title'])
+                elif t == 'guide':
+                    self._do_guide(task['image_pil'], task['win_title'])
+                elif t == 'combined':
+                    self._do_combined_translate(
+                        task['image_pil'], task['win_title'])
+            except Exception as e:
+                log(f'[Worker] 執行失敗: {e}')
+            finally:
+                _request_queue.task_done()
+                self.root.after(0, lambda: self._update_queue_label(_request_queue.qsize()))
+
+    def _trigger_auto_translate(self, image_pil):
+        """用已擷取的截圖觸發翻譯；若冷卻中或翻譯進行中則跳過"""
+        mode = self.engine_mode_var.get()
+        # 本地/OCR 模式不需要冷卻判斷
+        if mode not in ('local', 'ocr'):
+            model = self.model_var.get()
+            if self._get_remaining_cooldown(model) > 0:
+                return
+            if not self._check_cooldown_and_quota():
+                return
+        # 簡易翻譯進行中判斷（排除 EasyOCR/torch 常駐背景 thread）
+        _exclude = ('position', 'torch', 'easyocr', 'dataloader',
+                    'worker', 'dummy', 'threadpool')
+        active = [t for t in threading.enumerate()
+                  if t.is_alive() and t.daemon and t.name != 'MainThread'
+                  and not any(k in t.name.lower() for k in _exclude)
+                  and not any(k in type(t).__name__.lower() for k in _exclude)]
+        if active:
+            return
+        win_title = self.title_var.get().strip()
+        if self.combo_guide_var.get():
+            self._enqueue_task({'type': 'combined', 'image_pil': image_pil,
+                                'win_title': win_title, 'source': 'capture'})
+        else:
+            self._enqueue_task({'type': 'translate', 'image_pil': image_pil,
+                                'win_title': win_title, 'source': 'capture'})
+
+    def _stable_check_loop(self):
+        if not self.auto_trans_var.get():
+            return
+
+        try:
+            diff_threshold     = int(self.stable_diff_var.get())
+            stable_count_needed = int(self.stable_count_var.get())
+        except ValueError:
+            diff_threshold     = STABLE_DIFF_DEFAULT
+            stable_count_needed = STABLE_COUNT_DEFAULT
+
+        image_pil = self._try_capture()
+
+        if image_pil is not None:
+            import hashlib
+            from PIL import ImageChops
+            gray = image_pil.convert('L')
+
+            if self._stable_prev_img is not None:
+                # 尺寸不符時跳過差異比較（視窗大小變化）
+                if gray.size == self._stable_prev_img.size:
+                    diff    = ImageChops.difference(gray, self._stable_prev_img)
+                    pixels  = list(getattr(diff, "get_flattened_data", diff.getdata)())
+                    avg_diff = sum(pixels) / len(pixels) if pixels else 999
+
+                    if avg_diff < diff_threshold:
+                        self._stable_count += 1
+                    else:
+                        self._stable_count = 0
+
+                    if self._stable_count >= stable_count_needed:
+                        img_hash = hashlib.md5(image_pil.tobytes()).hexdigest()
+                        if img_hash != self._stable_last_hash:
+                            self._stable_last_hash = img_hash
+                            self._stable_count = 0
+                            self._trigger_auto_translate(image_pil)
+                else:
+                    self._stable_count = 0
+            else:
+                self._stable_count = 0
+
+            self._stable_prev_img = gray
+
+        # 自動翻譯模式下兼顧視窗跟隨（取代 polling）
+        self._reposition_windows()
+        self._auto_trans_job = self.root.after(
+            STABLE_CHECK_INTERVAL_MS, self._stable_check_loop)
+
+    # ══════════════════════════════════════════
+    # 關閉清理
+    # ══════════════════════════════════════════
+    def on_close(self):
+        # 場次錄製清理
+        if getattr(self, '_session_running', False):
+            self._stop_session()
+        if getattr(self, '_playback_job', None):
+            self.root.after_cancel(self._playback_job)
+        # 送出結束信號讓 request worker 正常退出
+        try:
+            _request_queue.put_nowait(None)
+        except queue.Full:
+            pass
+        # 關閉時儲存當前語言設定與視窗位置
+        try:
+            self._save_current_key_to_config()   # 確保 api_entry 當前值寫回 config
+            self.config['src_lang'] = self.src_lang_var.get()
+            self.config['tgt_lang'] = self.tgt_lang_var.get()
+            self.config['platform_category'] = self.platform_category_var.get()
+            self.config['platform'] = self.platform_var.get()
+            self.config['platform_mode'] = self.platform_mode_var.get()
+            self.config['engine_mode'] = self.engine_mode_var.get()
+            # OLLAMA 設定
+            if self._ollama_available:
+                self.config['use_ollama'] = self.use_ollama_var.get()
+                self.config['ollama_model'] = self.ollama_model_var.get()
+                try:
+                    t = int(self.ollama_timeout_var.get())
+                    if t > 0:
+                        self.config['ollama_timeout'] = t
+                except (ValueError, AttributeError):
+                    pass
+            save_config(self.config)
+        except Exception:
+            pass
+        # 取消自動翻譯輪詢
+        try:
+            if self._auto_trans_job:
+                self.root.after_cancel(self._auto_trans_job)
+                self._auto_trans_job = None
+        except Exception:
+            pass
+        try:
+            if HAS_KEYBOARD:
+                if getattr(self, '_hotkey_handle', None) is not None:
+                    keyboard.remove_hotkey(self._hotkey_handle)
+                    self._hotkey_handle = None
+                if getattr(self, '_guide_hotkey_handle', None) is not None:
+                    keyboard.remove_hotkey(self._guide_hotkey_handle)
+                    self._guide_hotkey_handle = None
+        except Exception as e:
+            log(f'關閉時清理 hotkey 失敗: {e}')
+        finally:
+            try:
+                if hasattr(self, 'display') and self.display.winfo_exists():
+                    self.display.destroy()
+            except:
+                pass
+            try:
+                if hasattr(self, 'guide_display') and self.guide_display.winfo_exists():
+                    self.guide_display.destroy()
+            except:
+                pass
+            self.root.destroy()
+
+    # ══════════════════════════════════════════
+    # 狀態列更新
+    # ══════════════════════════════════════════
+    def _safe_save_config(self):
+        """Thread-safe save_config：若在 worker thread 中呼叫，轉回主執行緒執行。"""
+        if threading.current_thread() is threading.main_thread():
+            save_config(self.config)
+        else:
+            self.root.after(0, lambda: save_config(self.config))
+
+    def _set_status(self, text, color='blue'):
+        # 簡化：移除訊息中的模型名稱前綴（格式：「引擎 (模型) 訊息」→「訊息」）
+        import re as _re
+        simplified = _re.sub(r'^[A-Za-z]+\s*\([^)]+\)\s*', '', text).strip()
+        if not simplified:
+            simplified = text
+        def _update():
+            if hasattr(self, 'status') and self.status.winfo_exists():
+                self.status.config(text=simplified, foreground=color)
+        self.root.after(0, _update)
+
+    def _start_elapsed_timer(self):
+        """啟動每秒遞增計時器，清空舊 timer。"""
+        if getattr(self, '_elapsed_timer_id', None):
+            self.root.after_cancel(self._elapsed_timer_id)
+            self._elapsed_timer_id = None
+        # 本地模式時清空冷卻欄
+        if getattr(self, 'engine_mode_var', None) and self.engine_mode_var.get() in ('local', 'ocr'):
+            if hasattr(self, 'cooldown_label') and self.cooldown_label.winfo_exists():
+                self.cooldown_label.config(text='')
+        self._trans_start_time = time.time()
+        self._elapsed_tick()
+
+    def _elapsed_tick(self):
+        """每秒更新一次計時顯示，直到 _trans_start_time 被清除。"""
+        if not getattr(self, '_trans_start_time', None):
+            return
+        if not (hasattr(self, 'elapsed_label') and self.elapsed_label.winfo_exists()):
+            return
+        secs = int(time.time() - self._trans_start_time)
+        self.elapsed_label.config(text=f'{secs}s', foreground='steelblue')
+        self._elapsed_timer_id = self.root.after(1000, self._elapsed_tick)
+
+    def _stamp_elapsed(self):
+        """停止計時並凍結顯示最終秒數。"""
+        if not getattr(self, '_trans_start_time', None):
+            return
+        if getattr(self, '_elapsed_timer_id', None):
+            self.root.after_cancel(self._elapsed_timer_id)
+            self._elapsed_timer_id = None
+        secs = int(time.time() - self._trans_start_time)
+        self._trans_start_time = None
+        def _freeze(s=secs):
+            if hasattr(self, 'elapsed_label') and self.elapsed_label.winfo_exists():
+                self.elapsed_label.config(text=f'{s}s', foreground='steelblue')
+        self.root.after(0, _freeze)
+
+    # ══════════════════════════════════════════
+    # 引擎 / 模型 UI
+    # ══════════════════════════════════════════
+    def _init_engine_ui(self):
+        # 若 config 有記錄預設引擎，啟動時套用
+        def_eng = self.config.get('default_engine', '')
+        def_model = self.config.get('default_model', '')
+        if def_eng and def_eng in ENGINE_ORDER:
+            self.engine_var.set(def_eng)
+        eng = self.engine_var.get()
+        self.key_label.config(text=f'{ENGINE_DISPLAY[eng]} API Key:')
+        self.api_entry.delete(0, tk.END)
+        self.api_entry.insert(0, self.config.get(eng, ''))
+        all_models = self._get_engine_models(eng)
+        self.model_combo['values'] = all_models
+        # 套用預設模型（若屬於該引擎）
+        if def_model and def_model in all_models:
+            self.model_var.set(def_model)
+        else:
+            self.model_var.set(ENGINE_DEFAULT_MODEL.get(eng, all_models[0] if all_models else ''))
+        self._refresh_quota()
+        self._update_cooldown_display()
+
+    def _on_engine_change(self):
+        self._save_current_key_to_config()
+        eng = self.engine_var.get()
+        self.key_label.config(text=f'{ENGINE_DISPLAY[eng]} API Key:')
+        self.api_entry.delete(0, tk.END)
+        self.api_entry.insert(0, self.config.get(eng, ''))
+        self.model_combo['values'] = self._get_engine_models(eng)
+        self.model_var.set(ENGINE_DEFAULT_MODEL[eng])
+        self._refresh_quota()
+
+    def _set_default_engine(self):
+        """將目前選用的引擎＋模型寫入 config 作為下次啟動預設"""
+        eng = self.engine_var.get()
+        model = self.model_var.get()
+        self.config['default_engine'] = eng
+        self.config['default_model'] = model
+        save_config(self.config)
+        log(f'已設定預設引擎: {eng} / {model}')
+        self._set_status(f'預設已儲存：{ENGINE_DISPLAY[eng]} / {model}', 'green')
+
+    def _save_current_key_to_config(self):
+        for eng in ENGINE_ORDER:
+            if self.key_label.cget('text') == f'{ENGINE_DISPLAY[eng]} API Key:':
+                self.config[eng] = self.api_entry.get()
+                break
+
+    def _add_custom_model(self):
+        """新增自訂模型到當前引擎"""
+        model_name = self.custom_model_var.get().strip()
+        if not model_name:
+            return
+        eng = self.engine_var.get()
+        custom_key = f'custom_models_{eng}'
+        custom_list = self.config.get(custom_key, [])
+        if model_name in custom_list or model_name in ENGINE_MODELS[eng]:
+            log(f'模型已存在: {model_name}')
+            self._set_status(f'模型已存在: {model_name}', 'orange')
+            return
+        custom_list.append(model_name)
+        self.config[custom_key] = custom_list
+        save_config(self.config)
+        # 更新下拉選單
+        self.model_combo['values'] = self._get_engine_models(eng)
+        self.model_var.set(model_name)
+        self.custom_model_var.set('')
+        self._refresh_quota()
+        log(f'已新增自訂模型: {eng} / {model_name}')
+        self._set_status(f'已新增: {model_name}', 'green')
+
+    def _remove_custom_model(self):
+        """移除目前選擇的自訂模型（僅限自訂清單內的可移除）"""
+        model_name = self.model_var.get()
+        eng = self.engine_var.get()
+        custom_key = f'custom_models_{eng}'
+        custom_list = self.config.get(custom_key, [])
+        if model_name in custom_list:
+            custom_list.remove(model_name)
+            self.config[custom_key] = custom_list
+            save_config(self.config)
+            all_models = self._get_engine_models(eng)
+            self.model_combo['values'] = all_models
+            self.model_var.set(all_models[0] if all_models else '')
+            self._refresh_quota()
+            log(f'已移除自訂模型: {eng} / {model_name}')
+            self._set_status(f'已移除: {model_name}', 'green')
+        elif model_name in ENGINE_MODELS[eng]:
+            log(f'內建模型無法移除: {model_name}')
+            self._set_status(f'內建模型無法移除', 'orange')
+        else:
+            self._set_status(f'找不到可移除的模型', 'orange')
+
+    def _get_engine_models(self, eng):
+        """取得引擎的完整模型清單（內建 + 自訂）"""
+        built_in = list(ENGINE_MODELS.get(eng, []))
+        custom = list(self.config.get(f'custom_models_{eng}', []))
+        return built_in + custom
+
+    def _refresh_quota(self):
+        global CURRENT_LANG
+        CURRENT_LANG = self.config.get('ui_lang', 'zh')
+        eng = self.engine_var.get()
+        model = self.model_var.get()
+        used_today = self.config.get('used_today', {})
+
+        used = used_today.get(model, 0)
+        limit = MODEL_DAILY_LIMITS.get(model, 500)
+        rpm = MODEL_RPM.get(model, 0)
+
+        if limit <= 0:
+            self.quota_label.config(text=f"▶ {model}:  {S('quota_no_free')}", foreground='red')
+        else:
+            rpm_str = f"RPM={rpm}" if rpm > 0 else ""
+            color = 'brown' if used < limit else 'red'
+            self.quota_label.config(
+                text=f"▶ {model}:  {used}/{limit} RPD  {rpm_str}",
+                foreground=color
+            )
+
+
+    # ══════════════════════════════════════════
+    # 視窗跟隨
+    # ══════════════════════════════════════════
+    # ══════════════════════════════════════════
+    # 全域快捷鍵
+    # ══════════════════════════════════════════
+    def _toggle_hotkey(self):
+        if not HAS_KEYBOARD:
+            self._set_status('需安裝 keyboard 模組: pip install keyboard', 'red')
+            return
+        if self.hotkey_active:
+            self._unregister_hotkey()
+        else:
+            self._register_hotkey()
+
+    def _register_hotkey(self):
+        key_str = self.hotkey_var.get().strip()
+        if not key_str:
+            return
+        try:
+            self._hotkey_handle = keyboard.add_hotkey(key_str, self._hotkey_triggered)
+            self.hotkey_active = True
+            self.hotkey_btn.config(text=S('btn_disable'))
+            self.hotkey_status.config(text=S('status_hotkey_on').format(key=key_str), foreground='green')
+            self.config['hotkey'] = key_str
+            save_config(self.config)
+            log(f'快捷鍵已註冊: {key_str}')
+            self._update_indicators()
+        except Exception as e:
+            log(f'快捷鍵註冊失敗: {e}')
+            self._set_status(f'快捷鍵設定失敗: {e}', 'red')
+
+    def _unregister_hotkey(self):
+        try:
+            # 使用 add_hotkey() 回傳的 handle 精確移除，不影響攻略快捷鍵
+            handle = getattr(self, '_hotkey_handle', None)
+            if handle is not None:
+                keyboard.remove_hotkey(handle)
+                self._hotkey_handle = None
+            self.hotkey_active = False
+            self.hotkey_btn.config(text=S('btn_enable'))
+            self.hotkey_status.config(text=S('lbl_hotkey_off'), foreground='gray')
+            log('快捷鍵已停用')
+            self._update_indicators()
+        except Exception as e:
+            log(f'快捷鍵停用失敗: {e}')
+
+    def _hotkey_triggered(self):
+        """快捷鍵觸發時，在主線程執行擷取翻譯"""
+        self.root.after(0, self.start_worker)
+
+
+    # ══════════════════════════════════════════
+    # 攻略快捷鍵
+    # ══════════════════════════════════════════
+    def _toggle_guide_hotkey(self):
+        if not HAS_KEYBOARD:
+            self._set_status('需安裝 keyboard 模組: pip install keyboard', 'red')
+            return
+        if self.guide_hotkey_active:
+            self._unregister_guide_hotkey()
+        else:
+            self._register_guide_hotkey()
+
+    def _register_guide_hotkey(self):
+        key_str = self.guide_hotkey_var.get().strip()
+        if not key_str:
+            return
+        try:
+            self._guide_hotkey_handle = keyboard.add_hotkey(key_str, self._guide_hotkey_triggered)
+            self.guide_hotkey_active = True
+            self.guide_hotkey_btn.config(text=S('btn_disable'))
+            self.guide_hotkey_status.config(text=S('status_hotkey_on').format(key=key_str), foreground='green')
+            self.config['guide_hotkey'] = key_str
+            save_config(self.config)
+            log(f'攻略快捷鍵已註冊: {key_str}')
+            self._update_indicators()
+        except Exception as e:
+            log(f'攻略快捷鍵註冊失敗: {e}')
+            self._set_status(f'攻略快捷鍵設定失敗: {e}', 'red')
+
+    def _unregister_guide_hotkey(self):
+        try:
+            # 使用 add_hotkey() 回傳的 handle 精確移除，不影響翻譯快捷鍵
+            handle = getattr(self, '_guide_hotkey_handle', None)
+            if handle is not None:
+                keyboard.remove_hotkey(handle)
+                self._guide_hotkey_handle = None
+            self.guide_hotkey_active = False
+            self.guide_hotkey_btn.config(text=S('btn_enable'))
+            self.guide_hotkey_status.config(text=S('lbl_hotkey_off'), foreground='gray')
+            log('攻略快捷鍵已停用')
+            self._update_indicators()
+        except Exception as e:
+            log(f'攻略快捷鍵停用失敗: {e}')
+
+    def _guide_hotkey_triggered(self):
+        self.root.after(0, self.start_guide_worker)
+
+    def _find_mesen_window(self, force: bool = False):
+        """找到目標視窗，回傳 (left, top, right, bottom) 或 None。
+        結果快取 500ms，避免 polling 每次都執行 EnumWindows。
+        force=True 強制略過快取（如切換目標視窗時）。
+        """
+        target = self.title_var.get().lower()
+        now = time.time()
+        # 快取命中：title 相同且未過期
+        if (not force
+                and self._mesen_cache_title == target
+                and now - self._mesen_cache_ts < 0.5):
+            return self._mesen_cache_rect
+        # 快取失效：重新 EnumWindows
+        result = [None]
+        def _handler(h, _):
+            if target in win32gui.GetWindowText(h).lower():
+                result[0] = win32gui.GetWindowRect(h)
+                return False
+            return True
+        try:
+            win32gui.EnumWindows(_handler, None)
+        except Exception:
+            pass
+        # 更新快取
+        self._mesen_cache_rect  = result[0]
+        self._mesen_cache_title = target
+        self._mesen_cache_ts    = now
+        return result[0]
+
+    def _on_main_move(self, event=None):
+        """<Configure> 事件 debounce：100ms 內重複觸發只執行最後一次。"""
+        if self._reposition_after_id:
+            self.root.after_cancel(self._reposition_after_id)
+        self._reposition_after_id = self.root.after(100, self._reposition_debounced)
+
+    def _reposition_debounced(self):
+        self._reposition_after_id = None
+        self._reposition_windows()
+
+
+    def _set_display_geom(self, geom: str):
+        """設定翻譯視窗位置，位置未改變時略過 geometry() 呼叫。"""
+        if geom != self._last_disp_geom:
+            self.display.geometry(geom)
+            self._last_disp_geom = geom
+
+    def _set_guide_geom(self, geom: str):
+        """設定攻略視窗位置，位置未改變時略過 geometry() 呼叫。"""
+        if geom != self._last_guide_geom:
+            self.guide_display.geometry(geom)
+            self._last_guide_geom = geom
+
+    def _reposition_windows(self):
+        """根據視窗模式重新定位翻譯與攻略視窗（只改位置不改大小）"""
+        try:
+            if not self.display.winfo_exists():
+                return
+            mode = self.winmode_var.get() if hasattr(self, 'winmode_var') else 'mesen'
+            dw = self.display.winfo_width()
+            dh = self.display.winfo_height()
+            has_guide = hasattr(self, 'guide_display') and self.guide_display.winfo_exists()
+
+            if mode == 'main':
+                mx = self.root.winfo_x()
+                my = self.root.winfo_y()
+                mw = self.root.winfo_width()
+                dx, dy = mx + mw + 10, my
+
+            elif mode == 'corner':
+                # 取得主視窗目前所在螢幕的邊界
+                mx = self.root.winfo_x()
+                my = self.root.winfo_y()
+                mon = next(
+                    (m for m in self._monitors
+                     if m['x'] <= mx < m['x'] + m['w'] and m['y'] <= my < m['y'] + m['h']),
+                    self._monitors[0]
+                )
+                sw, sh, sx, sy = mon['w'], mon['h'], mon['x'], mon['y']
+                # 翻譯視窗右上角
+                self._set_display_geom(f'+{sx + sw - dw - 10}+{sy}')
+                # 攻略視窗右下角
+                if has_guide:
+                    gh = self.guide_display.winfo_height()
+                    gw = self.guide_display.winfo_width()
+                    self._set_guide_geom(f'+{sx + sw - gw - 10}+{sy + sh - gh - 50}')
+                return
+
+            elif mode == 'sides':
+                # 依附目標視窗兩側：攻略在左、翻譯在右
+                mesen_rect = self._find_mesen_window()
+                if mesen_rect:
+                    # mesen_rect = (left, top, right, bottom)
+                    target_left  = mesen_rect[0]
+                    target_right = mesen_rect[2]
+                    target_top   = mesen_rect[1]
+                    gw = self.guide_display.winfo_width() if has_guide else 0
+                    # 翻譯視窗：目標視窗右邊
+                    dx, dy = target_right + 10, target_top
+                    # 攻略視窗：目標視窗左邊（貼齊左側，往左推出攻略視窗寬度）
+                    if has_guide:
+                        guide_x = target_left - gw - 10
+                        self._set_guide_geom(f'+{guide_x}+{target_top}')
+                else:
+                    # 找不到目標視窗，fallback 與 mesen 模式相同
+                    mx = self.root.winfo_x()
+                    my = self.root.winfo_y()
+                    mw = self.root.winfo_width()
+                    dx, dy = mx + mw + 10, my
+
+            else:  # 'mesen'
+                mesen_rect = self._find_mesen_window()
+                if mesen_rect:
+                    dx, dy = mesen_rect[2] + 10, mesen_rect[1]
+                else:
+                    mx = self.root.winfo_x()
+                    my = self.root.winfo_y()
+                    mw = self.root.winfo_width()
+                    dx, dy = mx + mw + 10, my
+
+            # main / mesen / sides 模式：設定翻譯視窗位置
+            self._set_display_geom(f'+{dx}+{dy}')
+            # sides 模式且找到目標視窗時，攻略視窗已在上方個別定位，不再覆蓋
+            if has_guide and mode != 'sides':
+                self._set_guide_geom(f'+{dx + dw + 10}+{dy}')
+            elif has_guide and mode == 'sides':
+                # sides fallback（找不到目標視窗）：攻略跟在翻譯右側
+                self._set_guide_geom(f'+{dx + dw + 10}+{dy}')
+
+        except:
+            pass
+
+    def _on_screen_change(self, event=None):
+        """螢幕選擇變更：移動主視窗至選定螢幕並儲存設定"""
+        label = self.screen_var.get()
+        mon = next((m for m in self._monitors if m['label'] == label), None)
+        if mon is None:
+            return
+        self.config['main_screen'] = mon['index']
+        save_config(self.config)
+        self.root.geometry(f'+{mon["x"] + 10}+{mon["y"] + 10}')
+        self.root.after(100, self._reposition_windows)
+
+    def _on_winmode_change(self):
+        """視窗模式切換時立即生效並儲存"""
+        self.config['winmode'] = self.winmode_var.get()
+        save_config(self.config)
+        self._reposition_windows()
+        log(f'視窗模式: {self.winmode_var.get()}')
+
+    def _on_combo_guide_toggle(self):
+        self.config['combo_guide'] = self.combo_guide_var.get()
+        save_config(self.config)
+        self._update_combo_guide_status()
+        state = '開啟' if self.combo_guide_var.get() else '關閉'
+        log(f'截取翻譯同時攻略: {state}')
+
+    def _update_combo_guide_status(self):
+        if self.combo_guide_var.get():
+            self.combo_guide_status.config(text=S('lbl_combo_on'), foreground='green')
+        else:
+            self.combo_guide_status.config(text=S('lbl_combo_off'), foreground='gray')
+        self._update_indicators()
+
+    def _on_use_ollama_toggle(self, event=None):
+        """OLLAMA 開關或模型選擇變更時儲存設定"""
+        self.config['use_ollama'] = self.use_ollama_var.get()
+        self.config['ollama_model'] = self.ollama_model_var.get()
+        try:
+            t = int(self.ollama_timeout_var.get())
+            if t > 0:
+                self.config['ollama_timeout'] = t
+        except (ValueError, AttributeError):
+            pass
+        save_config(self.config)
+
+    def _on_vision_filter_toggle(self):
+        """視覺引擎過濾開關切換：更新模型下拉清單"""
+        if not self._ollama_available or self.ollama_combo is None:
+            return
+        filtered = self.vision_filter_var.get()
+        self.config['ollama_vision_filter'] = filtered
+        new_list = (
+            _filter_vision_models(self._ollama_models)
+            if filtered else self._ollama_models
+        )
+        self.ollama_combo['values'] = new_list
+        # 若目前選取的模型不在新清單中，自動切到第一個
+        if self.ollama_model_var.get() not in new_list:
+            self.ollama_model_var.set(new_list[0])
+        log(f'[OLLAMA] 視覺過濾: {filtered}，清單剩 {len(new_list)} 個模型')
+        save_config(self.config)
+
+    def _update_queue_label(self, qsize: int = 0):
+        """更新第二列欄1的佇列狀態顯示。"""
+        if not hasattr(self, 'queue_label') or not self.queue_label.winfo_exists():
+            return
+        if qsize <= 0:
+            self.queue_label.config(text='', foreground='gray')
+        elif qsize >= REQUEST_QUEUE_MAXSIZE:
+            self.queue_label.config(
+                text=f'佇列 {qsize}/{REQUEST_QUEUE_MAXSIZE} ⚠', foreground='red')
+        else:
+            self.queue_label.config(
+                text=f'佇列 {qsize}/{REQUEST_QUEUE_MAXSIZE}', foreground='steelblue')
+
+    def _on_engine_mode_change(self):
+        """引擎模式切換（雲端/本地OLLAMA/OCR）"""
+        mode = self.engine_mode_var.get()
+        self.config['engine_mode'] = mode
+        self.use_ollama_var.set(mode == 'local')
+        self.config['use_ollama'] = (mode == 'local')
+        save_config(self.config)
+        self._apply_engine_mode(animate=True)
+
+    def _apply_engine_mode(self, animate: bool = True):
+        """依 engine_mode_var 在 engine_container 內顯示正確區塊。"""
+        mode = self.engine_mode_var.get()
+        self.cloud_frame.pack_forget()
+        self.local_frame.pack_forget()
+        if hasattr(self, 'ocr_frame'):
+            self.ocr_frame.pack_forget()
+        if mode == 'cloud':
+            self.cloud_frame.pack(in_=self.engine_container, fill='x')
+        elif mode == 'local':
+            self.local_frame.pack(in_=self.engine_container, fill='x')
+        else:  # ocr
+            self.ocr_frame.pack(in_=self.engine_container, fill='x')
+
+    def _update_indicators(self):
+        """更新 Tab1 欄3 四個開關指示燈（開=黑色，關=灰色）"""
+        if not hasattr(self, '_ind_auto'):
+            return
+        _ON  = '#111111'
+        _OFF = '#aaaaaa'
+        # 自動擷取
+        auto_on = getattr(self, 'auto_trans_var', None)
+        auto_on = auto_on.get() if auto_on else False
+        self._ind_auto.config(fg=_ON if auto_on else _OFF)
+        # 翻譯同時攻略
+        combo_on = getattr(self, 'combo_guide_var', None)
+        combo_on = combo_on.get() if combo_on else False
+        self._ind_combo.config(fg=_ON if combo_on else _OFF)
+        # 擷取快捷鍵
+        hk_on = getattr(self, 'hotkey_active', False)
+        self._ind_hotkey.config(fg=_ON if hk_on else _OFF)
+        # 攻略快捷鍵
+        ghk_on = getattr(self, 'guide_hotkey_active', False)
+        self._ind_guide_hotkey.config(fg=_ON if ghk_on else _OFF)
+
+
+    def _start_pick_window(self):
+        """開始倒數 5 秒，時間到抓取前景視窗標題。"""
+        if getattr(self, '_pick_countdown_id', None):
+            self.root.after_cancel(self._pick_countdown_id)
+        self.pick_window_btn.config(state='disabled')
+        self.pick_cancel_btn.config(state='normal')
+        self._pick_window_tick(5)
+
+    def _cancel_pick_window(self):
+        """取消倒數，恢復初始狀態。"""
+        if getattr(self, '_pick_countdown_id', None):
+            self.root.after_cancel(self._pick_countdown_id)
+            self._pick_countdown_id = None
+        self.pick_window_btn.config(state='normal')
+        self.pick_cancel_btn.config(state='disabled')
+        self.pick_hint_label.config(text='', foreground='orange')
+        log('[PickWindow] 已取消')
+
+    def _pick_window_tick(self, remaining: int):
+        """每秒更新倒數提示，歸零時抓取前景視窗。"""
+        if remaining > 0:
+            self.pick_hint_label.config(
+                text=S('lbl_pick_hint') + f' ({remaining})',
+                foreground='orange')
+            self._pick_countdown_id = self.root.after(
+                1000, self._pick_window_tick, remaining - 1)
+        else:
+            # 時間到，抓前景視窗
+            try:
+                hwnd = win32gui.GetForegroundWindow()
+                title = win32gui.GetWindowText(hwnd).strip()
+            except Exception:
+                title = ''
+
+            if title and title != self.root.title():
+                # 自動加入清單並選取
+                targets = list(self.config.get('target_windows', ['Mesen']))
+                if title not in targets:
+                    targets.append(title)
+                    self.config['target_windows'] = targets
+                    save_config(self.config)
+                self.target_combo['values'] = targets
+                self.title_var.set(title)
+                self.pick_hint_label.config(
+                    text=f'✓ {title}', foreground='green')
+                log(f'[PickWindow] 已選取: {title}')
+            else:
+                self.pick_hint_label.config(
+                    text='未偵測到有效視窗', foreground='red')
+
+            self.pick_window_btn.config(state='normal')
+            self.pick_cancel_btn.config(state='disabled')
+            self._pick_countdown_id = None
+
+    def _add_target_window(self):
+        """新增目標視窗到清單"""
+        self._mesen_cache_ts = 0.0  # 清快取，強制下次重新偵測
+        name = self.title_var.get().strip()
+        if not name:
+            return
+        targets = list(self.config.get('target_windows', ['Mesen']))
+        if name in targets:
+            self._set_status(f'目標視窗已存在: {name}', 'orange')
+            return
+        targets.append(name)
+        self.config['target_windows'] = targets
+        save_config(self.config)
+        self.target_combo['values'] = targets
+        log(f'已新增目標視窗: {name}')
+        self._set_status(f'已新增: {name}', 'green')
+
+    def _remove_target_window(self):
+        """移除目前選擇的目標視窗"""
+        self._mesen_cache_ts = 0.0  # 清快取
+        name = self.title_var.get().strip()
+        targets = list(self.config.get('target_windows', ['Mesen']))
+        if name not in targets:
+            self._set_status(f'找不到: {name}', 'orange')
+            return
+        targets.remove(name)
+        if not targets:
+            targets = ['Mesen']
+        self.config['target_windows'] = targets
+        save_config(self.config)
+        self.target_combo['values'] = targets
+        self.title_var.set(targets[0])
+        log(f'已移除目標視窗: {name}')
+        self._set_status(f'已移除: {name}', 'green')
+
+    def _start_position_polling(self):
+        """每 500ms 偵測 Mesen 視窗位置，自動跟隨移動。
+        自動翻譯開啟時暫停（由 _stable_check_loop 代勞 reposition）。
+        """
+        if not self._position_polling_paused:
+            self._reposition_windows()
+        self.root.after(500, self._start_position_polling)
+
+    # ══════════════════════════════════════════
+
+    # ══════════════════════════════════════════
+    # 選擇圖片檔案翻譯
+    # ══════════════════════════════════════════
+    def pick_image_file(self):
+        filepath = filedialog.askopenfilename(
+            title="選擇圖片檔案",
+            filetypes=[
+                ("圖片檔案", "*.png *.jpg *.jpeg *.bmp *.gif *.webp"),
+                ("所有檔案", "*.*"),
+            ]
+        )
+        if not filepath:
+            return
+        if self.engine_mode_var.get() not in ('local', 'ocr') and not self._check_cooldown_and_quota():
+            return
+        self._start_elapsed_timer()
+        self._set_status('讀取圖片中...', 'orange')
+        threading.Thread(target=self._file_translate_task, args=(filepath,), daemon=True).start()
+
+    def _file_translate_task(self, filepath):
+        try:
+            img = Image.open(filepath).convert('RGB')
+        except Exception as e:
+            log(f"圖片讀取失敗: {e}")
+            self._set_status('圖片讀取失敗', 'red')
+            return
+        self._enqueue_task({'type': 'translate', 'image_pil': img,
+                            'win_title': '', 'source': 'file'})
+
+    # ══════════════════════════════════════════
+    # 視窗擷取翻譯
+    # ══════════════════════════════════════════
+    def start_worker(self):
+        if self.engine_mode_var.get() not in ('local', 'ocr') and not self._check_cooldown_and_quota():
+            return
+        self._start_elapsed_timer()
+        self._set_status('擷取畫面中...', 'orange')
+        threading.Thread(target=self._window_capture_task, daemon=True).start()
+
+    def _window_capture_task(self):
+        target = self.title_var.get().lower().strip()
+        if not target:
+            self._set_status('請先設定目標視窗標題', 'red')
+            self._stamp_elapsed()
+            return
+        hwnd = None
+        def _handler(h, _):
+            nonlocal hwnd
+            if target in win32gui.GetWindowText(h).lower():
+                hwnd = h
+                return False
+            return True
+        win32gui.EnumWindows(_handler, None)
+        if not hwnd:
+            self._set_status('找不到目標視窗', 'red')
+            return
+
+        try:
+            crop_top = int(self.crop_top_var.get())
+        except ValueError:
+            crop_top = 0
+        if crop_top < 0:
+            crop_top = 0
+
+        # 儲存設定
+        if self.config.get('crop_top') != crop_top:
+            self.config['crop_top'] = crop_top
+            save_config(self.config)
+
+        img = self._grab_window_hwnd(hwnd, crop_top)
+        win_title = win32gui.GetWindowText(hwnd)
+        if self.combo_guide_var.get():
+            self._enqueue_task({'type': 'combined', 'image_pil': img,
+                                'win_title': win_title, 'source': 'capture'})
+        else:
+            self._enqueue_task({'type': 'translate', 'image_pil': img,
+                                'win_title': win_title, 'source': 'capture'})
+
+    # ══════════════════════════════════════════
+    # 共用翻譯流程
+    # ══════════════════════════════════════════
+    def _get_cooldown(self, model=None):
+        if model is None:
+            model = self.model_var.get()
+        rpm = MODEL_RPM.get(model, 0)
+        if rpm > 0:
+            return max(int(60 / rpm) + 1, 3)
+        return COOLDOWN_SECONDS_DEFAULT
+
+    def _get_remaining_cooldown(self, model=None):
+        """取得指定模型的剩餘冷卻秒數，0=可用"""
+        if model is None:
+            model = self.model_var.get()
+        last_time = LAST_REQUEST_TIME.get(model, 0)
+        cooldown = self._get_cooldown(model)
+        elapsed = time.time() - last_time
+        remaining = cooldown - elapsed
+        return max(0, remaining)
+
+    def _check_cooldown_and_quota(self):
+        model = self.model_var.get()
+        used = self.config['used_today'].get(model, 0)
+        limit = MODEL_DAILY_LIMITS.get(model, 500)
+
+        remaining = self._get_remaining_cooldown(model)
+        if remaining > 0:
+            wait = int(remaining) + 1
+            log(f"{model} 冷卻中，請等 {wait} 秒...")
+            self._set_status(f'{model} 冷卻中，請等 {wait} 秒', 'orange')
+            return False
+
+        # RPD 用完 → 自動切換下一個可用模型/引擎
+        if limit <= 0 or used >= limit:
+            log(f"{model} 已無額度 ({used}/{limit})，嘗試自動切換...")
+            if self._auto_switch_model():
+                # 切換成功，重新檢查新模型的冷卻
+                return self._check_cooldown_and_quota()
+            else:
+                self._set_status('所有模型額度已用完', 'red')
+                return False
+
+        LAST_REQUEST_TIME[model] = time.time()
+        self._start_cooldown_timer()
+        return True
+
+    def _auto_switch_model(self):
+        current_eng = self.engine_var.get()
+        current_model = self.model_var.get()
+        search_order = []
+        cur_models = self._get_engine_models(current_eng)
+        cur_idx = cur_models.index(current_model) if current_model in cur_models else -1
+        for m in cur_models[cur_idx + 1:]:
+            search_order.append((current_eng, m))
+        cur_eng_idx = ENGINE_ORDER.index(current_eng) if current_eng in ENGINE_ORDER else 0
+        for offset in range(1, len(ENGINE_ORDER)):
+            eng = ENGINE_ORDER[(cur_eng_idx + offset) % len(ENGINE_ORDER)]
+            if not self.config.get(eng, '').strip():
+                continue
+            for m in self._get_engine_models(eng):
+                search_order.append((eng, m))
+        for eng, model in search_order:
+            used = self.config['used_today'].get(model, 0)
+            limit = MODEL_DAILY_LIMITS.get(model, 500)
+            if limit > 0 and used < limit:
+                log(f'自動切換: {ENGINE_DISPLAY[eng]} / {model} ({used}/{limit})')
+                if eng != current_eng:
+                    self._save_current_key_to_config()
+                    self.engine_var.set(eng)
+                    self.key_label.config(text=f'{ENGINE_DISPLAY[eng]} API Key:')
+                    self.api_entry.delete(0, tk.END)
+                    self.api_entry.insert(0, self.config.get(eng, ''))
+                    self.model_combo['values'] = self._get_engine_models(eng)
+                self.model_var.set(model)
+                self._refresh_quota()
+                self._update_cooldown_display()
+                self._set_status(f'自動切換至 {model}', 'blue')
+                return True
+        log('所有引擎/模型的每日額度皆已用完')
+        return False
+
+    def _start_cooldown_timer(self):
+        """啟動 UI 冷卻倒數計時器"""
+        if self._cooldown_timer_id:
+            self.root.after_cancel(self._cooldown_timer_id)
+        self._update_cooldown_display()
+
+    def _update_cooldown_display(self):
+        """每秒更新冷卻倒數顯示（欄2，不顯示模型名稱）"""
+        if not hasattr(self, 'cooldown_label'):
+            return
+        model = self.model_var.get()
+        remaining = self._get_remaining_cooldown(model)
+        if remaining > 0:
+            secs = int(remaining) + 1
+            self.cooldown_label.config(
+                text=f'⏱ 冷卻: {secs}s',
+                foreground='orange'
+            )
+            self._cooldown_timer_id = self.root.after(1000, self._update_cooldown_display)
+        else:
+            self.cooldown_label.config(
+                text=f'✓ {S("lbl_available")}',
+                foreground='green'
+            )
+            self._cooldown_timer_id = None
+
+    def _parse_429_retry_delay(self, error_str):
+        m = re.search(r'retry\s*(?:Delay|in)["\s:]*(\d+\.?\d*)\s*s', error_str, re.IGNORECASE)
+        if m:
+            return int(float(m.group(1))) + 1
+        return None
+
+
+    def _is_quota_zero(self, error_str):
+        return 'limit: 0' in error_str
+
+    def _log_json_debug(self, eng, model, json_err, raw_text):
+        sep = "=" * 72
+        log(sep)
+        log("JSON PARSE FAIL - DEBUG INFO")
+        log(f"  Engine:  {ENGINE_DISPLAY.get(eng, eng)}")
+        log(f"  Model:   {model}")
+        log(f"  Time:    {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        log(f"  Error:   {json_err}")
+        log(f"  Length:  {len(raw_text)} chars")
+        log("-" * 72)
+        max_show = 3000
+        log("[RAW API RESPONSE]")
+        log(raw_text[:max_show])
+        if len(raw_text) > max_show:
+            log(f"  ... (truncated, full={len(raw_text)})")
+        log("-" * 72)
+        cleaned = re.sub(r'```json\s*|```', '', raw_text).strip()
+        col_match = re.search(r'char(?:acter)?\s*(\d+)', json_err)
+        if col_match:
+            col = int(col_match.group(1))
+            s = max(0, col - 50)
+            e = min(len(cleaned), col + 50)
+            snippet = cleaned[s:e]
+            arrow_pos = min(50, col - s)
+            log("[ERROR POSITION]")
+            log(f"  Near char {col}:")
+            log(f"  ...{snippet}...")
+            log(f"     {' ' * arrow_pos}^^^")
+            cs = max(0, col - 5)
+            ce = min(len(cleaned), col + 5)
+            log("[CHAR-BY-CHAR]")
+            for ci in range(cs, ce):
+                c = cleaned[ci]
+                tag = " <-- ERROR" if ci == col else ""
+                log(f"  [{ci}] '{c}' (U+{ord(c):04X}){tag}")
+        log("-" * 72)
+        log("[POSSIBLE CAUSE]")
+        if "Expecting ',' delimiter" in json_err:
+            log("  -> JSON missing comma, model may have extra text or incomplete JSON")
+        elif "Expecting ':'" in json_err:
+            log("  -> JSON key-value format error")
+        elif "Unterminated string" in json_err:
+            log("  -> Unclosed quote, response may be truncated")
+        elif "Extra data" in json_err:
+            log("  -> Extra text after JSON end")
+        elif "Expecting value" in json_err:
+            log("  -> Invalid char where JSON value expected")
+        else:
+            log("  -> Model response is not valid JSON")
+        log("  -> Try: switch model or capture clearer image")
+        log(sep)
+
+    # ══════════════════════════════════════════
+    # 遊戲攻略
+    # ══════════════════════════════════════════
+    def start_guide_worker(self):
+        if not self._check_cooldown_and_quota():
+            return
+        threading.Thread(target=self._guide_capture_task, daemon=True).start()
+
+    def _guide_capture_task(self):
+        """截取目標視窗畫面並送出攻略請求"""
+        target = self.title_var.get().lower()
+        hwnd = None
+        def _handler(h, _):
+            nonlocal hwnd
+            if target in win32gui.GetWindowText(h).lower():
+                hwnd = h
+                return False
+            return True
+        win32gui.EnumWindows(_handler, None)
+        if not hwnd:
+            self._set_status('找不到目標視窗', 'red')
+            return
+
+        try:
+            crop_top = int(self.crop_top_var.get())
+        except ValueError:
+            crop_top = 0
+        if crop_top < 0:
+            crop_top = 0
+
+        img = self._grab_window_hwnd(hwnd, crop_top)
+        win_title = win32gui.GetWindowText(hwnd)
+        self._enqueue_task({'type': 'guide', 'image_pil': img,
+                            'win_title': win_title, 'source': 'capture'})
+
+    def _rescue_guide_from_text(self, text: str):
+        """從無法正常解析的 JSON 字串中救援 progress 與 guide 欄位"""
+        progress = ''
+        guide_list = []
+        if not text:
+            return progress, guide_list
+        # 嘗試用 regex 直接抽取 progress 字串值
+        m_prog = re.search(r'"progress"\s*:\s*"([^"]*)"', text)
+        if m_prog:
+            progress = m_prog.group(1)
+        # 嘗試抽取 guide 陣列內容（提取所有 "..." 字串項目）
+        m_guide = re.search(r'"guide"\s*:\s*\[([^\]]*)\]', text, re.DOTALL)
+        if m_guide:
+            raw_items = m_guide.group(1)
+            guide_list = re.findall(r'"([^"]+)"', raw_items)
+        return progress, guide_list
+
+    def _do_guide(self, image_pil, win_title):
+        """送出攻略請求到 AI 引擎"""
+        eng = self.engine_var.get()
+        model = self.model_var.get()
+        api_key = self.api_entry.get().strip()
+
+        if not api_key:
+            self._set_status('請輸入 API Key', 'red')
+            return
+
+        # 從視窗標題取得 ROM 名稱與區域版本
+        rom_name = win_title
+        if ' - ' in win_title:
+            rom_name = win_title.split(' - ', 1)[1]
+        region = 'Japan'
+        if '(USA)' in rom_name or '(U)' in rom_name:
+            region = 'USA'
+        elif '(Europe)' in rom_name or '(E)' in rom_name:
+            region = 'Europe'
+        elif '(Japan)' in rom_name or '(J)' in rom_name:
+            region = 'Japan'
+
+        # 去除 ROM 名稱中的區域標籤避免重複
+        display_name = re.sub(r'\s*\((USA|Japan|Europe|J|U|E)\)', '', rom_name).strip()
+        guide_prompt = build_guide_prompt(display_name, region, self.tgt_lang_var.get())
+
+        self._set_status('攻略分析中...', 'blue')
+        log(f'攻略請求: {model} / {rom_name} ({region})')
+
+        try:
+            caller = ENGINE_CALLERS[eng]
+            raw = caller(api_key, model, image_pil, guide_prompt)
+
+            # 解析結果
+            if isinstance(raw, list) and len(raw) > 0:
+                raw = raw[0]
+            progress = raw.get('progress', '（無法辨識進度）') if isinstance(raw, dict) else str(raw)
+            guide_list = raw.get('guide', []) if isinstance(raw, dict) else []
+
+            # 更新配額
+            self.config['used_today'][model] = self.config['used_today'].get(model, 0) + 1
+            self._safe_save_config()
+            self.root.after(0, self._refresh_quota)
+
+            # 儲存到 DB
+            self._save_guide_log(rom_name, model, progress, guide_list, image_pil=image_pil)
+
+            # 顯示結果到翻譯視窗
+            self.root.after(0, lambda: self._render_guide(progress, guide_list, image_pil))
+            self._set_status('攻略分析完成', 'green')
+            log(f'{model} 攻略分析成功')
+
+        except ValueError as e:
+            err_str = str(e)
+            log(f'攻略分析失敗: {err_str}')
+            # ── JSON 解析失敗時：嘗試從原始文字直接救援 progress/guide ──
+            if err_str.startswith('JSON_PARSE_FAIL|'):
+                raw_text = err_str.split('|', 2)[2] if err_str.count('|') >= 2 else ''
+                progress, guide_list = self._rescue_guide_from_text(raw_text)
+                if progress or guide_list:
+                    log(f'攻略救援解析成功: progress={bool(progress)}, guide={len(guide_list)} 項')
+                    self.config['used_today'][model] = self.config['used_today'].get(model, 0) + 1
+                    self._safe_save_config()
+                    self.root.after(0, self._refresh_quota)
+                    self._save_guide_log(rom_name, model, progress, guide_list, image_pil=image_pil)
+                    self.root.after(0, lambda _p=progress, _g=guide_list: self._render_guide(_p, _g, image_pil))
+                    self._set_status('攻略分析完成', 'green')
+                    return
+            self._set_status('攻略 JSON 解析失敗（詳見 PowerShell）', 'red')
+
+        except Exception as e:
+            err_str = str(e)
+            log(f'攻略分析失敗: {err_str}')
+
+            # ── 套件未安裝 ──
+            if isinstance(e, (ModuleNotFoundError, ImportError)):
+                missing = err_str.replace("No module named ", "").strip("'")
+                self._set_status(f'缺少套件: {missing}，請執行 pip install {missing}', 'red')
+            elif '429' in err_str or 'RESOURCE_EXHAUSTED' in err_str or 'rate_limit' in err_str.lower():
+                retry_sec = self._parse_429_retry_delay(err_str)
+                if retry_sec:
+                    self._set_status(f'429 限流，建議等 {retry_sec} 秒後重試', 'red')
+                else:
+                    self._set_status('429 配額超限，請稍後或換模型', 'red')
+            elif '503' in err_str or 'UNAVAILABLE' in err_str:
+                self._set_status(f'{model} 服務繁忙，請稍後重試或換模型', 'red')
+            elif '401' in err_str or '403' in err_str or 'UNAUTHENTICATED' in err_str:
+                self._set_status(f'API Key 無效或過期，請確認 Key', 'red')
+            else:
+                self._set_status('攻略分析失敗', 'red')
+
+
+    def _render_guide(self, progress, guide_list, image_pil):
+        """將攻略結果渲染到攻略資訊視窗（黑底美觀排版）"""
+        if not hasattr(self, 'guide_display') or not self.guide_display.winfo_exists():
+            return
+
+        # 尺寸與翻譯結果視窗相同
+        out_w = self.display.winfo_width()
+        out_h = self.display.winfo_height()
+        if out_w < 100 or out_h < 100:
+            out_w, out_h = image_pil.width, image_pil.height
+
+        # 深色背景畫布
+        out_img = Image.new('RGB', (out_w, out_h), (26, 26, 46))  # #1a1a2e
+        draw = ImageDraw.Draw(out_img)
+
+        tgt_lang_str = self.tgt_lang_var.get() if hasattr(self, 'tgt_lang_var') else 'Traditional Chinese(正體中文)'
+        font_header = _get_font_for_lang(tgt_lang_str, 22)
+        font_body   = _get_font_for_lang(tgt_lang_str, 16)
+        font_small  = _get_font_for_lang(tgt_lang_str, 13)
+
+        pad = PADDING + 5
+        y = pad
+
+        # ── 頂部裝飾線 ──
+        draw.line([(pad, y), (out_w - pad, y)], fill=(80, 200, 255), width=2)
+        y += 10
+
+        # ── 標題：目前進度 ──
+        draw.text((pad, y), '▎目前進度', font=font_header, fill=(255, 215, 0))  # 金色
+        y += 32
+
+        # 進度內容
+        progress_clean = progress.replace('\n', ' ').replace('\r', '')
+        y = draw_wrapped_text_safe(draw, progress_clean, pad + 8, y, font_body, out_w, out_h, (230, 230, 230))
+        y += 20
+
+        # ── 分隔線 ──
+        draw.line([(pad, y), (out_w - pad, y)], fill=(60, 60, 100), width=1)
+        y += 12
+
+        # ── 標題：目前攻略內容 ──
+        draw.text((pad, y), '▎目前攻略內容', font=font_header, fill=(255, 215, 0))
+        y += 32
+
+        # 攻略條目
+        colors = [
+            (100, 220, 255),  # 淺藍
+            (150, 255, 150),  # 淺綠
+            (255, 200, 100),  # 淺橘
+            (200, 180, 255),  # 淺紫
+            (255, 160, 180),  # 淺粉
+        ]
+        for idx, item in enumerate(guide_list):
+            if y > out_h - 30:
+                break
+            item_clean = item.replace('\n', ' ').replace('\r', '')
+            bullet_color = colors[idx % len(colors)]
+            # 圓點符號
+            draw.text((pad + 4, y), '●', font=font_small, fill=bullet_color)
+            # 內容文字
+            y = draw_wrapped_text_safe(draw, item_clean, pad + 24, y, font_body, out_w, out_h, (220, 220, 220))
+            y += 10
+
+        # ── 底部裝飾線 ──
+        bottom_y = min(y + 10, out_h - pad)
+        draw.line([(pad, bottom_y), (out_w - pad, bottom_y)], fill=(80, 200, 255), width=2)
+
+        # 調整視窗大小並顯示
+        self.guide_display.geometry(f'{out_w}x{out_h}')
+        self.guide_display.deiconify()
+        self.guide_tk_img = ImageTk.PhotoImage(out_img)
+        self.guide_canvas.config(image=self.guide_tk_img)
+
+    def _save_guide_log(self, rom_name, model, progress, guide_list, image_pil=None):
+        """儲存攻略紀錄到 SQLite，並存 256×256 縮圖（不含 DB）"""
+        import sqlite3
+        try:
+            ss_rel = None
+            if image_pil is not None:
+                safe_name = re.sub(r'[\\/:*?"<>|]', '_', rom_name).strip() or 'unknown_rom'
+                ss_dir = os.path.join(self.LOG_DIR, 'guide_screenshots', safe_name)
+                os.makedirs(ss_dir, exist_ok=True)
+                ts = time.strftime('%Y%m%d_%H%M%S')
+                ss_filename = f'{ts}.jpg'
+                ss_path = os.path.join(ss_dir, ss_filename)
+                thumb = image_pil.copy()
+                thumb.thumbnail((256, 256), Image.LANCZOS)
+                thumb.save(ss_path, format='JPEG', quality=85)
+                ss_rel = os.path.join('guide_screenshots', safe_name, ss_filename)
+
+            conn = sqlite3.connect(self.DB_PATH)
+            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+            guide_json = json.dumps(guide_list, ensure_ascii=False)
+            conn.execute(
+                'INSERT INTO guides (rom_name, timestamp, model, progress, guide_content, screenshot_path) '
+                'VALUES (?, ?, ?, ?, ?, ?)',
+                (rom_name, timestamp, model, progress, guide_json, ss_rel)
+            )
+            conn.commit()
+            count = conn.execute(
+                'SELECT COUNT(*) FROM guides WHERE rom_name = ?', (rom_name,)
+            ).fetchone()[0]
+            conn.close()
+            log(f'攻略紀錄已儲存: {rom_name} (第 {count} 筆)')
+            self._guide_nav_rom_name = rom_name
+            self._guide_nav_index    = 0
+            self.root.after(0, self._guide_nav_reload)
+        except Exception as e:
+            log(f'儲存攻略紀錄失敗: {e}')
+
+    # ══════════════════════════════════════════
+    # 合併翻譯+攻略（單一 REQUEST）
+    # ══════════════════════════════════════════
+    def _do_combined_translate(self, image_pil, win_title):
+        eng = self.engine_var.get()
+        api_key = self.api_entry.get().strip()
+        model = self.model_var.get()
+
+        if not api_key:
+            self._set_status(f'請輸入 {ENGINE_DISPLAY[eng]} API Key', 'red')
+            return
+
+        # 取得 ROM 名稱與區域版本
+        rom_name = win_title
+        if ' - ' in win_title:
+            rom_name = win_title.split(' - ', 1)[1]
+        region = 'Japan'
+        if '(USA)' in rom_name or '(U)' in rom_name:
+            region = 'USA'
+        elif '(Europe)' in rom_name or '(E)' in rom_name:
+            region = 'Europe'
+        elif '(Japan)' in rom_name or '(J)' in rom_name:
+            region = 'Japan'
+        display_name = re.sub(r'\s*\((USA|Japan|Europe|J|U|E)\)', '', rom_name).strip()
+
+        combined_prompt = build_combined_prompt(display_name, region, self.src_lang_var.get(), self.tgt_lang_var.get())
+
+        self._set_status(f'{ENGINE_DISPLAY[eng]} ({model}) 翻譯+攻略分析中...', 'orange')
+        log(f'合併請求: {model} / {display_name} ({region})')
+
+        try:
+            caller = ENGINE_CALLERS[eng]
+            raw = caller(api_key, model, image_pil, combined_prompt)
+
+            # 解析合併回應
+            if isinstance(raw, list) and len(raw) > 0:
+                raw = raw[0]
+
+            if isinstance(raw, dict):
+                translations = raw.get('translations', [])
+                progress = raw.get('progress', '（無法辨識進度）')
+                guide_list = raw.get('guide', [])
+            else:
+                translations = []
+                progress = '（解析失敗）'
+                guide_list = []
+
+            # 更新配額（只消耗一次）
+            self.config['used_today'][model] = self.config['used_today'].get(model, 0) + 1
+            self.config[eng] = api_key
+            self._safe_save_config()
+            self.root.after(0, self._refresh_quota)
+
+            # 儲存翻譯紀錄
+            if translations:
+                self.last_res = translations
+                self._save_translation_log(translations, model, win_title, image_pil,
+                                           target_window=self.title_var.get().strip(),
+                                           platform=self.platform_var.get().strip())
+
+            # 儲存攻略紀錄
+            if progress or guide_list:
+                self._save_guide_log(rom_name, model, progress, guide_list, image_pil=image_pil)
+
+            # 渲染翻譯結果
+            self.root.after(0, lambda _t=translations, _img=image_pil:
+                self.render(_t, _img, 'capture'))
+
+            # 渲染攻略結果
+            self.root.after(0, lambda _p=progress, _g=guide_list, _img=image_pil:
+                self._render_guide(_p, _g, _img))
+
+            self._set_status('翻譯+攻略完成', 'green')
+            self._stamp_elapsed()
+            log(f'{model} 合併請求成功: {len(translations)} 段翻譯, {len(guide_list)} 條攻略')
+
+        except ValueError as e:
+            err_msg = str(e)
+            if err_msg.startswith('JSON_PARSE_FAIL|'):
+                parts = err_msg.split('|', 2)
+                json_err = parts[1] if len(parts) > 1 else 'unknown'
+                raw_text = parts[2] if len(parts) > 2 else ''
+                self._log_json_debug(eng, model, json_err, raw_text)
+                self._set_status('JSON 解析失敗（詳見 PowerShell）', 'red')
+            else:
+                log(f'ValueError: {err_msg}')
+                self._set_status(f'錯誤: {err_msg[:60]}', 'red')
+
+        except Exception as e:
+            err_str = str(e)
+            log(f'合併請求失敗: {err_str}')
+            # ── 套件未安裝 ──
+            if isinstance(e, (ModuleNotFoundError, ImportError)):
+                missing = err_str.replace("No module named ", "").strip("'")
+                self._set_status(f'缺少套件: {missing}，請執行 pip install {missing}', 'red')
+            elif '429' in err_str or 'RESOURCE_EXHAUSTED' in err_str or 'rate_limit' in err_str.lower():
+                retry_sec = self._parse_429_retry_delay(err_str)
+                if retry_sec:
+                    self._set_status(f'429 限流，建議等 {retry_sec} 秒後重試', 'red')
+                else:
+                    self._set_status('429 配額超限，請稍後或換模型', 'red')
+            elif '503' in err_str or 'UNAVAILABLE' in err_str:
+                self._set_status(f'{model} 服務繁忙，請稍後重試', 'red')
+            elif '401' in err_str or '403' in err_str:
+                self._set_status(f'API Key 無效或過期', 'red')
+            else:
+                self._set_status(f'合併請求失敗', 'red')
+
+
+    # ══════════════════════════════════════════
+    # 本地 OCR + 雲端 AI 翻譯
+    # ══════════════════════════════════════════
+    def _do_ocr_translate(self, image_pil, source='file', win_title=''):
+        """EasyOCR 辨識文字座標 → Groq llama-4-scout 翻譯"""
+        OCR_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+
+
+        # ── Step1：EasyOCR 辨識 ──
+        self._set_status('OCR 辨識中...', 'orange')
+        try:
+            import easyocr
+        except ImportError:
+            self._set_status('缺少 easyocr，請執行 pip install easyocr', 'red')
+            self._stamp_elapsed()
+            return
+
+        try:
+            # OCR 語言從遊戲語言推導
+            src_lang_str = self.src_lang_var.get()
+            ocr_langs = [LANG_TO_BCP47.get(src_lang_str, 'ja').split('-')[0]]
+            # EasyOCR Reader 建立耗時（第一次需下載模型），快取在 self 上
+            if not hasattr(self, '_easyocr_reader') or self._easyocr_langs != ocr_langs:
+                log(f'[OCR] 初始化 EasyOCR langs={ocr_langs}')
+                import warnings, logging
+                warnings.filterwarnings('ignore')
+                logging.getLogger('easyocr').setLevel(logging.ERROR)
+                logging.getLogger('torch').setLevel(logging.ERROR)
+                self._easyocr_reader = easyocr.Reader(ocr_langs, gpu=False, verbose=False)
+                self._easyocr_langs  = ocr_langs
+
+            import numpy as np
+            img_np = np.array(image_pil)
+            ocr_results = self._easyocr_reader.readtext(img_np)
+            # 過濾低信心值結果（門檻 0.3，低於此值視為雜訊）
+            OCR_CONF_THRESHOLD = 0.1
+            ocr_results = [r for r in ocr_results if r[2] >= OCR_CONF_THRESHOLD]
+            if not ocr_results:
+                self._set_status('OCR 未偵測到可信文字', 'gray')
+                self._stamp_elapsed()
+                return
+            log(f'[OCR] 偵測到 {len(ocr_results)} 個文字區塊（信心值 ≥ {OCR_CONF_THRESHOLD}）')
+            orig_w, orig_h = image_pil.width, image_pil.height
+            for i, (bbox, text, conf) in enumerate(ocr_results):
+                log(f'[OCR] {i+1}: {text!r} (conf={conf:.2f})')
+        except Exception as e:
+            self._set_status(f'OCR 失敗: {str(e)[:60]}', 'red')
+            self._stamp_elapsed()
+            return
+
+        # ── Step2：Google 翻譯（urllib，無需 API Key）──
+        self._set_status('OCR → Google 翻譯中...', 'orange')
+        try:
+            src_lang = self.src_lang_var.get()
+            tgt_lang = self.tgt_lang_var.get()
+            src_bcp = LANG_TO_BCP47.get(src_lang, 'auto')
+            tgt_bcp = LANG_TO_BCP47.get(tgt_lang, 'zh-TW')
+
+            translations = {}
+            for i, (bbox, text, conf) in enumerate(ocr_results):
+                translated = _google_translate(text, src_bcp, tgt_bcp)
+                translations[i + 1] = translated
+                log(f'[OCR→GT] {i+1}: {text!r} → {translated!r}')
+
+        except Exception as e:
+            self._set_status(f'Google 翻譯失敗: {str(e)[:60]}', 'red')
+            self._stamp_elapsed()
+            return
+
+        # ── Step3：組合 segments（OCR 座標 + AI 譯文）──
+        segments = []
+        for i, (bbox, text, conf) in enumerate(ocr_results):
+            tw = translations.get(i + 1, text)
+            # bbox: [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
+            xs = [p[0] for p in bbox]
+            ys = [p[1] for p in bbox]
+            x0 = min(xs) / orig_w
+            y0 = min(ys) / orig_h
+            w  = (max(xs) - min(xs)) / orig_w
+            h  = (max(ys) - min(ys)) / orig_h
+            segments.append({
+                'tw': tw,
+                'x': round(x0, 4),
+                'y': round(y0, 4),
+                'w': round(w,  4),
+                'h': round(h,  4),
+            })
+
+        if not segments:
+            self._set_status('OCR 無有效結果', 'gray')
+            self._stamp_elapsed()
+            return
+
+        # ── Step4：儲存 + 渲染（Google 翻譯不消耗引擎配額）──
+        self._set_status(f'OCR 翻譯完成（{len(segments)} 段）', 'green')
+        self._stamp_elapsed()
+
+        if source == 'capture' and segments:
+            self._save_translation_log(segments, 'OCR+GoogleTranslate', win_title, image_pil,
+                                       target_window=self.title_var.get().strip(),
+                                       platform=self.platform_var.get().strip())
+
+        self.root.after(0, lambda _s=segments, _img=image_pil:
+                        self.render(_s, _img, source))
+
+    def _do_translate(self, image_pil, source='file', win_title=''):
+        translate_prompt = build_translate_prompt(self.src_lang_var.get(), self.tgt_lang_var.get())
+
+        # ── OCR 模式優先判斷 ──
+        if getattr(self, 'engine_mode_var', None) and self.engine_mode_var.get() == 'ocr':
+            self._do_ocr_translate(image_pil, source, win_title)
+            return
+
+        # ── OLLAMA 優先判斷 ──
+        use_ollama = (getattr(self, 'use_ollama_var', None) and
+                      self.use_ollama_var.get() and
+                      self._ollama_available)
+        if use_ollama:
+            ollama_model = self.ollama_model_var.get()
+            if not ollama_model:
+                self._set_status(S('status_ollama_no_model'), 'red')
+                return
+            try:
+                ollama_timeout = int(self.ollama_timeout_var.get())
+                if ollama_timeout <= 0:
+                    ollama_timeout = OLLAMA_TIMEOUT
+            except (ValueError, AttributeError):
+                ollama_timeout = OLLAMA_TIMEOUT
+            self._set_status(f'OLLAMA 推理中... (timeout={ollama_timeout}s)', 'orange')
+            try:
+                res = call_ollama(ollama_model, image_pil, translate_prompt,
+                                  timeout=ollama_timeout)
+            except TimeoutError as e:
+                log(f'OLLAMA timeout: {e}')
+                self._set_status(S('status_ollama_timeout'), 'red')
+                res = []
+            except ValueError as e:
+                err_msg = str(e)
+                if err_msg.startswith('JSON_PARSE_FAIL|'):
+                    parts = err_msg.split('|', 2)
+                    self._log_json_debug('ollama', ollama_model,
+                                         parts[1] if len(parts) > 1 else 'unknown',
+                                         parts[2] if len(parts) > 2 else '')
+                    self._set_status('JSON 解析失敗（詳見 PowerShell）', 'red')
+                else:
+                    log(f'OLLAMA 解析錯誤: {err_msg[:80]}')
+                    self._set_status(f'解析錯誤: {err_msg[:60]}', 'red')
+                res = []
+            except Exception as e:
+                log(f'OLLAMA 呼叫失敗: {e}')
+                self._set_status(S('status_ollama_fail').format(err=str(e)[:60]), 'red')
+                res = []
+            # 無論成功或失敗，都停止計時並恢復就緒狀態
+            if not res:
+                self._stamp_elapsed()
+            if res:
+                self.last_res = res
+                self.config['used_today'][ollama_model] = \
+                    self.config['used_today'].get(ollama_model, 0) + 1
+                self._safe_save_config()
+                self._set_status('翻譯完成', 'green')
+                self._stamp_elapsed()
+                log(f'OLLAMA ({ollama_model}) 翻譯成功，共 {len(res)} 段')
+                if source == 'capture' and res:
+                    self._save_translation_log(res, ollama_model, win_title, image_pil,
+                                               target_window=self.title_var.get().strip(),
+                                               platform=self.platform_var.get().strip())
+            if res:
+                self.root.after(0, lambda _r=res, _img=image_pil, _s=source:
+                                self.render(_r, _img, _s))
+            return
+
+        # ── 雲端引擎流程 ──
+        eng = self.engine_var.get()
+        api_key = self.api_entry.get().strip()
+        model = self.model_var.get()
+
+        if not api_key:
+            self._set_status(f'請輸入 {ENGINE_DISPLAY[eng]} API Key', 'red')
+            return
+
+        self._set_status(f'{ENGINE_DISPLAY[eng]} ({model}) 分析中...', 'orange')
+
+        try:
+            caller = ENGINE_CALLERS[eng]
+            translate_prompt = build_translate_prompt(self.src_lang_var.get(), self.tgt_lang_var.get())
+            res = caller(api_key, model, image_pil, translate_prompt)
+
+        except ValueError as e:
+            # _parse_json_response 拋出的 JSON 解析失敗，包含原始回應
+            err_msg = str(e)
+            if err_msg.startswith("JSON_PARSE_FAIL|"):
+                parts = err_msg.split("|", 2)
+                json_err = parts[1] if len(parts) > 1 else "unknown"
+                raw_text = parts[2] if len(parts) > 2 else ""
+                self._log_json_debug(eng, model, json_err, raw_text)
+                self._set_status('JSON 解析失敗（詳見 PowerShell）', 'red')
+            else:
+                log(f"ValueError: {err_msg}")
+                self._set_status(f'錯誤: {err_msg[:60]}', 'red')
+            res = []
+
+        except Exception as e:
+            err_str = str(e)
+            log(f"{ENGINE_DISPLAY[eng]} API 呼叫失敗: {err_str}")
+
+            # ── 套件未安裝 ──
+            if isinstance(e, (ModuleNotFoundError, ImportError)):
+                missing = err_str.replace("No module named ", "").strip("'")
+                self._set_status(f'缺少套件: {missing}，請執行 pip install {missing}', 'red')
+            elif '429' in err_str or 'RESOURCE_EXHAUSTED' in err_str:
+                if self._is_quota_zero(err_str):
+                    MODEL_DAILY_LIMITS[model] = 0
+                    self._set_status(S('quota_switch').format(model=model), 'red')
+                    self.root.after(0, self._refresh_quota)
+                else:
+                    retry_sec = self._parse_429_retry_delay(err_str)
+                    if retry_sec:
+                        self._set_status(f'429 限流，建議等 {retry_sec} 秒後重試', 'red')
+                    else:
+                        self._set_status('429 配額超限，請稍後或換模型', 'red')
+            # ── 503 服務繁忙 ──
+            elif '503' in err_str or 'UNAVAILABLE' in err_str or 'high demand' in err_str.lower():
+                self._set_status(f'{model} 服務繁忙，請稍後重試或換模型', 'red')
+            # ── 401/403 認證失敗 ──
+            elif '401' in err_str or '403' in err_str or 'UNAUTHENTICATED' in err_str or 'PERMISSION_DENIED' in err_str:
+                self._set_status(f'API Key 無效或過期，請確認 {ENGINE_DISPLAY[eng]} Key', 'red')
+            # ── 400 請求錯誤 ──
+            elif '400' in err_str or 'INVALID_ARGUMENT' in err_str:
+                self._set_status('請求格式錯誤，該模型可能不支援圖片', 'red')
+            # ── 500 內部錯誤 ──
+            elif '500' in err_str or 'INTERNAL' in err_str:
+                self._set_status(f'{ENGINE_DISPLAY[eng]} 伺服器內部錯誤，請稍後重試', 'red')
+            # ── 網路問題 ──
+            elif 'connect' in err_str.lower() or 'timeout' in err_str.lower() or 'ConnectionError' in err_str:
+                self._set_status('網路連線失敗，請檢查網路', 'red')
+            # ── 其他 ──
+            else:
+                self._set_status(f'API 失敗: {err_str[:60]}', 'red')
+            res = []
+
+        if res:
+            self.last_res = res
+            self.config['used_today'][model] = self.config['used_today'].get(model, 0) + 1
+            self.config[eng] = api_key
+            self._safe_save_config()
+            self.root.after(0, self._refresh_quota)
+            self._set_status('翻譯完成', 'green')
+            self._stamp_elapsed()
+            log(f"{model} 翻譯成功，共 {len(res)} 段")
+
+            # 畫面擷取模式：儲存翻譯紀錄
+            if source == 'capture' and res:
+                self._save_translation_log(res, model, win_title, image_pil,
+                                           target_window=self.title_var.get().strip(),
+                                           platform=self.platform_var.get().strip())
+
+        self.root.after(0, lambda _r=res, _img=image_pil, _s=source: self.render(_r, _img, _s))
+
+    # ══════════════════════════════════════════
+    # ══════════════════════════════════════════
+    # 翻譯紀錄儲存（SQLite + 截圖）
+    # ══════════════════════════════════════════
+    LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'translation_logs')
+    DB_PATH = os.path.join(LOG_DIR, 'translations.db')
+
+    def _init_db(self):
+        """初始化 SQLite 資料庫"""
+        import sqlite3
+        os.makedirs(self.LOG_DIR, exist_ok=True)
+        conn = sqlite3.connect(self.DB_PATH)
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS translations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rom_name TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                model TEXT NOT NULL,
+                lines TEXT NOT NULL,
+                screenshot_path TEXT,
+                target_window TEXT,
+                platform TEXT
+            )
+        ''')
+        # 舊資料庫相容：若欄位不存在則自動新增
+        cursor = conn.execute("PRAGMA table_info(translations)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'target_window' not in columns:
+            conn.execute("ALTER TABLE translations ADD COLUMN target_window TEXT")
+        if 'platform' not in columns:
+            conn.execute("ALTER TABLE translations ADD COLUMN platform TEXT")
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS guides (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                rom_name TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                model TEXT NOT NULL,
+                progress TEXT NOT NULL,
+                guide_content TEXT NOT NULL,
+                screenshot_path TEXT
+            )
+        ''')
+        # 舊資料庫相容：若欄位不存在則自動新增
+        cursor2 = conn.execute("PRAGMA table_info(guides)")
+        guide_cols = [row[1] for row in cursor2.fetchall()]
+        if 'screenshot_path' not in guide_cols:
+            conn.execute("ALTER TABLE guides ADD COLUMN screenshot_path TEXT")
+        # ── sessions / frames 表（場次錄製功能）──
+        existing_tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        if 'sessions' not in existing_tables:
+            conn.execute('''
+                CREATE TABLE sessions (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_name    TEXT NOT NULL,
+                    platform     TEXT,
+                    started_at   TEXT NOT NULL,
+                    ended_at     TEXT,
+                    total_frames INTEGER DEFAULT 0,
+                    dir_size_kb  INTEGER DEFAULT 0
+                )
+            ''')
+        # migration: 加 dir_size_kb
+        existing_cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()] if 'sessions' in existing_tables else []
+        if 'dir_size_kb' not in existing_cols and 'sessions' in existing_tables:
+            conn.execute('ALTER TABLE sessions ADD COLUMN dir_size_kb INTEGER DEFAULT 0')
+            conn.commit()
+        if 'frames' not in existing_tables:
+            conn.execute('''
+                CREATE TABLE frames (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id  INTEGER NOT NULL,
+                    seq         INTEGER NOT NULL,
+                    ts          TEXT NOT NULL,
+                    img_path    TEXT NOT NULL,
+                    translation TEXT
+                )
+            ''')
+        conn.commit()
+        conn.close()
+        # 補算舊場次的 dir_size_kb
+        self.root.after(500, self._backfill_session_sizes)
+
+    def _backfill_session_sizes(self):
+        """補算歷史場次目錄大小（dir_size_kb=0 的場次）。"""
+        import sqlite3
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            rows = conn.execute(
+                'SELECT id FROM sessions WHERE dir_size_kb=0 OR dir_size_kb IS NULL').fetchall()
+            for (sid,) in rows:
+                first = conn.execute(
+                    'SELECT img_path FROM frames WHERE session_id=? LIMIT 1',
+                    (sid,)).fetchone()
+                if first:
+                    sess_dir = os.path.dirname(os.path.join(self.LOG_DIR, first[0]))
+                    kb = _calc_dir_size_kb(sess_dir)
+                    conn.execute('UPDATE sessions SET dir_size_kb=? WHERE id=?', (kb, sid))
+            conn.commit()
+            conn.close()
+            if rows:
+                log(f'[DB] 補算 {len(rows)} 筆場次大小完成')
+        except Exception as e:
+            log(f'[DB] 補算場次大小失敗: {e}')
+
+    def _save_translation_log(self, segments, model, win_title, image_pil, target_window='', platform=''):
+        """儲存翻譯紀錄到 SQLite + 截圖到對應遊戲目錄"""
+        import sqlite3
+        try:
+            # 從視窗標題擷取 ROM 名稱
+            rom_name = win_title
+            if ' - ' in win_title:
+                rom_name = win_title.split(' - ', 1)[1]
+            safe_name = re.sub(r'[\\/:*?"<>|]', '_', rom_name).strip()
+            if not safe_name:
+                safe_name = 'unknown_rom'
+
+            # ── 儲存截圖到 translation_logs/screenshots/遊戲名稱/ ──
+            ss_dir = os.path.join(self.LOG_DIR, 'screenshots', safe_name)
+            os.makedirs(ss_dir, exist_ok=True)
+            ts = time.strftime('%Y%m%d_%H%M%S')
+            ss_filename = f'{ts}.jpg'
+            ss_path = os.path.join(ss_dir, ss_filename)
+            image_pil.save(ss_path, format='JPEG', quality=85)
+
+            # 截圖相對路徑（相對於 translation_logs/）
+            ss_rel = os.path.join('screenshots', safe_name, ss_filename)
+
+            # ── 寫入 SQLite ──
+            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+            full_segments = [
+                {'tw': s.get('tw', ''), 'x': s.get('x', 0.05), 'y': s.get('y', 0.1),
+                 'w': s.get('w', 0.9), 'h': s.get('h', 0.08)}
+                for s in segments if s.get('tw')
+            ]
+            lines_json = json.dumps(full_segments, ensure_ascii=False)
+
+            conn = sqlite3.connect(self.DB_PATH)
+            conn.execute(
+                'INSERT INTO translations (rom_name, timestamp, model, lines, screenshot_path, target_window, platform) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (rom_name, timestamp, model, lines_json, ss_rel, target_window, platform)
+            )
+            conn.commit()
+            count = conn.execute(
+                'SELECT COUNT(*) FROM translations WHERE rom_name = ?', (rom_name,)
+            ).fetchone()[0]
+            conn.close()
+
+            log(f'翻譯紀錄已儲存: {rom_name} (第 {count} 筆) 截圖: {ss_rel}')
+            # 更新導覽狀態（存檔完成後才觸發，確保 DB 已寫入）
+            self._nav_rom_name = rom_name
+            self._nav_index    = max(0, len(self._nav_ids) - 1)
+            self.root.after(0, self._nav_reload)
+        except Exception as e:
+            log(f'儲存翻譯紀錄失敗: {e}')
+
+    # ══════════════════════════════════════════
+    # 翻譯結果視窗導覽
+    # ══════════════════════════════════════════
+    def _nav_reload(self):
+        """重新從 DB 載入同遊戲所有翻譯 id，更新導覽列顯示。"""
+        import sqlite3
+        if not self._nav_rom_name:
+            return
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            rows = conn.execute(
+                'SELECT id FROM translations WHERE rom_name=? ORDER BY id ASC',
+                (self._nav_rom_name,)).fetchall()
+            conn.close()
+            self._nav_ids = [r[0] for r in rows]
+        except Exception:
+            self._nav_ids = []
+        # 跳到最新一筆（清單末尾）
+        self._nav_index = max(0, len(self._nav_ids) - 1)
+        self._nav_update_bar()
+
+    def _nav_update_bar(self):
+        """更新導覽列按鈕狀態與計數文字。"""
+        total = len(self._nav_ids)
+        if total == 0:
+            self._nav_label.config(text='')
+            self._nav_prev_btn.config(state='disabled')
+            self._nav_next_btn.config(state='disabled')
+            return
+        pos = self._nav_index + 1
+        self._nav_label.config(text=f'{pos} / {total}')
+        self._nav_prev_btn.config(
+            state='normal' if self._nav_index > 0 else 'disabled')
+        self._nav_next_btn.config(
+            state='normal' if self._nav_index < total - 1 else 'disabled')
+
+    def _nav_go(self, index: int):
+        """跳到指定 index 的歷史紀錄並渲染。"""
+        import sqlite3
+        if index < 0 or index >= len(self._nav_ids):
+            return
+        db_id = self._nav_ids[index]
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            row = conn.execute(
+                'SELECT lines, screenshot_path FROM translations WHERE id=?',
+                (db_id,)).fetchone()
+            conn.close()
+            if not row:
+                return
+            segments = []
+            for i, item in enumerate(json.loads(row[0])):
+                if isinstance(item, str):
+                    segments.append({'tw': item, 'x': 0.05,
+                                     'y': round(i * 0.09 + 0.05, 4), 'w': 0.9, 'h': 0.08})
+                else:
+                    segments.append(item)
+            ss_path = os.path.join(self.LOG_DIR, row[1]) if row[1] else None
+            if ss_path and os.path.exists(ss_path):
+                img = Image.open(ss_path).convert('RGB')
+            else:
+                # 無截圖：建立黑底佔位
+                img = Image.new('RGB', (TARGET_DISPLAY_WIDTH, DISPLAY_INIT_HEIGHT), (0, 0, 0))
+            self._nav_index = index
+            self._nav_update_bar()
+            self.render(segments, img, source='history')
+        except Exception as e:
+            log(f'[Nav] 載入歷史失敗: {e}')
+
+    def _nav_prev(self):
+        """往舊（index-1）"""
+        self._nav_go(self._nav_index - 1)
+
+    def _nav_next(self):
+        """往新（index+1）"""
+        self._nav_go(self._nav_index + 1)
+
+    # ══════════════════════════════════════════
+    # 攻略視窗導覽
+    # ══════════════════════════════════════════
+    def _guide_nav_reload(self):
+        """重新從 DB 載入同遊戲所有攻略 id（ASC），跳到最新。"""
+        import sqlite3
+        if not self._guide_nav_rom_name:
+            return
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            rows = conn.execute(
+                'SELECT id FROM guides WHERE rom_name=? ORDER BY id ASC',
+                (self._guide_nav_rom_name,)).fetchall()
+            conn.close()
+            self._guide_nav_ids = [r[0] for r in rows]
+        except Exception:
+            self._guide_nav_ids = []
+        self._guide_nav_index = max(0, len(self._guide_nav_ids) - 1)
+        self._guide_nav_update_bar()
+
+    def _guide_nav_update_bar(self):
+        """更新攻略導覽列按鈕狀態與計數文字。"""
+        total = len(self._guide_nav_ids)
+        if not (hasattr(self, '_guide_nav_label') and
+                self._guide_nav_label.winfo_exists()):
+            return
+        if total == 0:
+            self._guide_nav_label.config(text='')
+            self._guide_nav_prev_btn.config(state='disabled')
+            self._guide_nav_next_btn.config(state='disabled')
+            return
+        pos = self._guide_nav_index + 1
+        self._guide_nav_label.config(text=f'{pos} / {total}')
+        self._guide_nav_prev_btn.config(
+            state='normal' if self._guide_nav_index > 0 else 'disabled')
+        self._guide_nav_next_btn.config(
+            state='normal' if self._guide_nav_index < total - 1 else 'disabled')
+
+    def _guide_nav_go(self, index: int):
+        """跳到指定 index 的歷史攻略並重新渲染。"""
+        import sqlite3
+        if index < 0 or index >= len(self._guide_nav_ids):
+            return
+        db_id = self._guide_nav_ids[index]
+        try:
+            conn = sqlite3.connect(self.DB_PATH)
+            row = conn.execute(
+                'SELECT progress, guide_content, screenshot_path FROM guides WHERE id=?',
+                (db_id,)).fetchone()
+            conn.close()
+            if not row:
+                return
+            progress, guide_json, ss_rel = row
+            guide_list = json.loads(guide_json) if guide_json else []
+            if ss_rel:
+                ss_path = os.path.join(self.LOG_DIR, ss_rel)
+                try:
+                    img = Image.open(ss_path).convert('RGB')
+                except Exception:
+                    img = Image.new('RGB', (TARGET_DISPLAY_WIDTH, DISPLAY_INIT_HEIGHT), (26, 26, 46))
+            else:
+                img = Image.new('RGB', (TARGET_DISPLAY_WIDTH, DISPLAY_INIT_HEIGHT), (26, 26, 46))
+            self._guide_nav_index = index
+            self._guide_nav_update_bar()
+            self._render_guide(progress, guide_list, img)
+        except Exception as e:
+            log(f'[GuideNav] 載入歷史失敗: {e}')
+
+    def _guide_nav_prev(self):
+        self._guide_nav_go(self._guide_nav_index - 1)
+
+    def _guide_nav_next(self):
+        self._guide_nav_go(self._guide_nav_index + 1)
+
+    # ══════════════════════════════════════════
+    # 渲染結果
+    # ══════════════════════════════════════════
+    def render(self, segments, image_pil, source='capture'):
+        log(f'render 被呼叫: source={source}, segments={len(segments) if segments else 0}')
+        if not self.display.winfo_exists() or not segments:
+            log(f'render 提前返回: display={self.display.winfo_exists()}, segments={bool(segments)}')
+            return
+
+        # 依原圖寬度決定目標顯示寬度
+        _src_w = image_pil.width
+        _target_w = DISPLAY_WIDTH_LARGE if _src_w > WIDE_SOURCE_THRESHOLD else TARGET_DISPLAY_WIDTH
+
+        if source == 'file':
+            orig_w, orig_h = image_pil.width, image_pil.height
+            mode = self.winmode_var.get() if hasattr(self, 'winmode_var') else 'mesen'
+            if mode == 'corner':
+                max_h = self.root.winfo_screenheight() // 2 - 30
+                max_w = _target_w
+            else:
+                max_h = DISPLAY_INIT_HEIGHT
+                max_w = _target_w
+            scale = min(max_w / orig_w, max_h / orig_h)
+            out_w = int(orig_w * scale)
+            out_h = int(orig_h * scale)
+            image_pil = image_pil.resize((out_w, out_h), Image.LANCZOS)
+        elif source == 'history':
+            # 歷史模式：縮放到目標寬度，不限高度，保持原始比例
+            orig_w, orig_h = image_pil.width, image_pil.height
+            scale = _target_w / orig_w
+            out_w = int(orig_w * scale)
+            out_h = int(orig_h * scale)
+            image_pil = image_pil.resize((out_w, out_h), Image.LANCZOS)
+        else:
+            # capture 模式：縮放到目標寬度，同時限制高度不超過螢幕高度
+            orig_w, orig_h = image_pil.width, image_pil.height
+            scale_w = _target_w / orig_w
+            max_h = self.root.winfo_screenheight() - 80
+            scale_h = max_h / orig_h
+            scale = min(scale_w, scale_h)
+            out_w = int(orig_w * scale)
+            out_h = int(orig_h * scale)
+            image_pil = image_pil.resize((out_w, out_h), Image.LANCZOS)
+
+        is_vertical = self.text_dir_var.get() == 'vertical'
+        if is_vertical:
+            sorted_segs = sorted(segments, key=lambda s: (-float(s.get('x', 0)), float(s.get('y', 0))))
+        else:
+            sorted_segs = sorted(segments, key=lambda s: float(s.get('y', 0)))
+        if self.config.get('text_direction') != self.text_dir_var.get():
+            self.config['text_direction'] = self.text_dir_var.get()
+            save_config(self.config)
+
+        # 收集非空譯文及其座標
+        items = []
+        for s in sorted_segs:
+            tw = s.get('tw', '').replace('\n', ' ').replace('\r', '').strip()
+            if tw:
+                sx = float(s.get('x', 0.05))
+                sy = float(s.get('y', 0.1))
+                # 自動偵測並正規化：若模型回傳像素值而非比例值，則除以原始圖片尺寸
+                if sx > 1.0:
+                    sx = sx / orig_w
+                if sy > 1.0:
+                    sy = sy / orig_h
+                sx = max(0.0, min(1.0, sx))
+                sy = max(0.0, min(1.0, sy))
+                items.append((tw, sx, sy))
+        if not items:
+            return
+
+        # ── 方向E：render 前合併相近 segment（防疊字預處理）──
+        # 先還原成 dict 格式供 _merge_segments 處理，再轉回 tuple
+        raw_dicts = [{'tw': tw, 'x': sx, 'y': sy, 'w': 0.1, 'h': 0.05}
+                     for tw, sx, sy in items]
+        merged = _merge_segments(raw_dicts, x_thresh=0.05, y_thresh=0.02)
+        items = [(m['tw'].replace('\n', ' '), m['x'], m['y']) for m in merged]
+
+        items.sort(key=lambda t: t[2])  # 依 sy 升序：y 小的（選單）先於 y 大的（對話框）
+
+        # ── 自動調整字級 ──
+        tgt_lang = getattr(self, 'tgt_lang_var', None)
+        tgt_lang_str = tgt_lang.get() if tgt_lang else 'Traditional Chinese(正體中文)'
+        font_size = 22
+        min_font_size = 9   # 方向A：允許縮小至 9px 作為疊字輔助
+
+        while font_size >= min_font_size:
+            font = _get_font_for_lang(tgt_lang_str, font_size)
+            if font is None:
+                font = ImageFont.load_default()
+                break
+
+            line_h = font_size + 4
+            usable_w = out_w - PADDING * 2
+            y_limit = out_h - PADDING
+
+            sim_col_next_y = {}
+            sim_ok = True
+            for tw, sx, sy in items:
+                col = int(sx * 8) if not is_vertical else 0
+                col_next = sim_col_next_y.get(col, PADDING)
+                draw_x = PADDING if is_vertical else max(PADDING, int(sx * out_w))
+                text_w = out_w - draw_x - PADDING
+                if text_w < 30:
+                    draw_x = PADDING
+                    text_w = usable_w
+                avg_cw = font_size * 0.55
+                cpl = max(1, int(text_w / avg_cw))
+                nlines = max(1, -(-len(tw) // cpl))
+                block_h = nlines * line_h + 2
+
+                raw_y = int(sy * out_h)
+                # 同欄內：若 raw_y 在 col_next 的 2 倍行高以內，視為連續行往下推
+                # 否則視為新區塊，直接使用 raw_y（避免跨對話框的段落互相干擾）
+                if raw_y >= col_next + line_h * 2:
+                    target_y = raw_y
+                elif raw_y >= col_next:
+                    target_y = raw_y
+                else:
+                    target_y = col_next
+
+                if target_y + block_h <= y_limit:
+                    sim_col_next_y[col] = target_y + block_h
+                else:
+                    sim_col_next_y[col] = col_next + block_h
+                    if sim_col_next_y[col] > out_h:
+                        sim_ok = False
+                        break
+
+            if sim_ok:
+                break
+            font_size -= 1
+
+        # ── 底圖：原圖 + 30% 不透明度 ──
+        bg_rgba = image_pil.convert('RGBA')
+        black_bg = Image.new('RGBA', (out_w, out_h), (0, 0, 0, 255))
+        blended = Image.blend(black_bg, bg_rgba, alpha=0.30)
+        out_img = blended.convert('RGB')
+        draw = ImageDraw.Draw(out_img)
+
+        # ── 繪製譯文 ──
+        line_h = font_size + 4
+        y_limit = out_h - PADDING
+        col_next_y = {}
+
+        for tw, sx, sy in items:
+            draw_x = PADDING if is_vertical else max(PADDING, int(sx * out_w))
+            col = 0 if is_vertical else int(sx * 8)
+            col_next = col_next_y.get(col, PADDING)
+
+            raw_y = int(sy * out_h)
+            # 同欄內：若 raw_y 在 col_next 的 2 倍行高以內，視為連續行往下推
+            # 否則視為新區塊，直接使用 raw_y（避免跨對話框的段落互相干擾）
+            # 額外：若 raw_y 已超過 col_next 足夠多，代表是新的 UI 區塊，重置防疊
+            if raw_y >= col_next + line_h * 2:
+                draw_y = raw_y   # 新區塊，直接使用 AI 給的 y
+            elif raw_y >= col_next:
+                draw_y = raw_y   # 有空間，直接用 raw_y
+            else:
+                draw_y = col_next  # 真正的疊字才往下推
+
+            text_w = out_w - draw_x - PADDING
+            if text_w < 30:
+                draw_x = PADDING
+            avg_cw = font_size * 0.55
+            cpl = max(1, int((out_w - draw_x - PADDING) / avg_cw)) if avg_cw > 0 else 1
+            nlines = max(1, -(-len(tw) // cpl))
+            block_h = nlines * (font_size + 4) + 2
+
+            if draw_y + block_h > y_limit:
+                draw_y = max(PADDING, y_limit - block_h)
+
+            draw_wrapped_text_safe(draw, tw, draw_x + 1, draw_y + 1, font, out_w, out_h, (0, 0, 0))
+            draw_wrapped_text_safe(draw, tw, draw_x, draw_y, font, out_w, out_h, 'white')
+            col_next_y[col] = draw_y + block_h
+
+        if source == 'capture':
+            self.display.geometry(f'{out_w}x{out_h}')
+        else:
+            self.display.geometry(f'{out_w}x{out_h}')
+
+        self.tk_img = ImageTk.PhotoImage(out_img)
+        self.canvas_label.config(image=self.tk_img)
+        self.display.deiconify()
+        self.display.lift()
+        log(f'render 完成: {out_w}x{out_h}, 字級={font_size}, 段數={len(items)}')
+
+
+# ==========================================
+# 啟動入口
+# ==========================================
+if __name__ == '__main__':
+    # 設定 Per-Monitor DPI Aware，讓 Tkinter 直接用實體像素座標
+    # 避免 Windows DPI 虛擬化造成 geometry() 座標不穩定
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+    root = tk.Tk()
+    root.withdraw()           # 先隱藏，避免未設定位置就閃現
+    root.update_idletasks()   # 讓 DPI 設定生效後再建立 UI
+    app = LangForgeApp(root)
+    root.mainloop()

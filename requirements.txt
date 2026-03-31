@@ -1,0 +1,30 @@
+# LangForge 依賴列表
+
+# GUI
+tkinter>=0.0.0
+
+# 圖像處理
+pillow>=10.0.0
+
+# API 和網絡
+requests>=2.31.0
+
+# AI 引擎
+google-generativeai>=0.3.0
+anthropic>=0.20.0
+groq>=0.7.0
+mistralai>=0.0.15
+
+# 本地 OCR
+easyocr>=1.7.0
+
+# 數據處理
+numpy>=1.24.0
+python-dateutil>=2.8.0
+pydantic>=2.0.0
+
+# 系統相關
+pywin32>=305; sys_platform == 'win32'
+
+# 打包（可選）
+pyinstaller>=6.0.0

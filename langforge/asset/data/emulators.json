@@ -1,0 +1,25 @@
+{
+  "platforms": {
+    "Emulators": [
+      "BizHawk",
+      "Cemu",
+      "Dolphin",
+      "DuckStation",
+      "MAME",
+      "Mednafen",
+      "MESS",
+      "Mesen",
+      "PCSX2",
+      "PPSSPP",
+      "Project64",
+      "RPCS3",
+      "Snes9x",
+      "Stella",
+      "XEMU",
+      "Xenia"
+    ],
+    "Frontends": [
+      "RetroArch"
+    ]
+  }
+}

@@ -1,0 +1,43 @@
+# PyInstaller
+build/
+dist/
+*.spec
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+
+# Python
+*.egg-info/
+*.egg
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 應用程式運行時生成的檔案
+langforge/config/configs.json
+langforge/translation_logs/
+langforge/core/__pycache__/
+
+# 用戶數據（本地 OCR 模型等）
+.EasyOCR/
+C:\Users\*\.EasyOCR\
+
+# 編輯器備份
+*.bak
+*.tmp
+
+# 系統檔案
+.env
+.env.local
+Thumbs.db

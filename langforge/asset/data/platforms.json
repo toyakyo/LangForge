@@ -1,0 +1,68 @@
+{
+  "platforms": {
+    "Arcade": [
+      "Atomiswave",
+      "CP System",
+      "CP System II",
+      "CP System III",
+      "Model 1/2/3",
+      "NAOMI",
+      "Naomi 2",
+      "Neo Geo MVS",
+      "PGM"
+    ],    
+    "Handhelds": [
+      "Game Boy",
+      "Game Boy Advance",
+      "Game Gear",
+      "Lynx",
+      "N3DS",
+      "NDS",
+      "PlayStation Portable",
+      "PlayStation Vita",
+      "Virtual Boy"
+    ],
+    "Home Consoles": [
+      "2600/5200/7800",
+      "3DO",
+      "Dreamcast",
+      "GameCube",
+      "Genesis/Mega Drive",
+      "Genesis/Mega Drive CD",
+      "Jaguar",
+      "N64",
+      "NES/FC",
+      "Neo Geo/CD",
+      "PC Engine",
+      "PC-FX",
+      "PlayStation",
+      "PlayStation 2",
+      "PlayStation 3",
+      "PlayStation 4",
+      "PlayStation 5",
+      "Saturn",
+      "SG-1000/SC-3000/SF-7000",
+      "Master System",
+      "Super NES/SFC",
+      "Wii",
+      "Wii U",
+      "Xbox",
+      "Xbox 360",
+      "Xbox One/X",
+      "Xbox Series S/X"
+    ],
+    "Hybrid": [
+      "Switch",
+      "Switch 2"
+    ],
+    "PC X86": [
+      "DOS",
+      "Other Windows",
+      "Windows 10/11",
+      "Windows 7",
+      "Windows 95",
+      "Windows 98",
+      "Windows XP"
+    ]
+  }
+}
