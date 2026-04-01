@@ -41,3 +41,7 @@ C:\Users\*\.EasyOCR\
 .env
 .env.local
 Thumbs.db
+
+#Other
+fix_all_paths_for_single_exe.py
+git流程.txt

@@ -1,4 +1,4 @@
-"""LangForge V1.0.1-beta.5
+"""LangForge V1.0.1-beta.6
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -6,7 +6,7 @@ GitHub : https://github.com/toyakyo
 License: Copyright © 2026 GoOnSoft. All rights reserved.
 
 需要安裝的第三方套件（一鍵安裝）:
-  pip install anthropic google-genai groq keyboard mistralai openai pillow pywin32
+  pip install anthropic easyocr google-genai groq keyboard mistralai numpy openai pillow pywin32
 """
 
 import threading
@@ -26,7 +26,7 @@ except ImportError:
 # 讀取 platforms.json
 # ==========================================
 def _load_platforms():
-    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'asset', 'data', 'platforms.json')
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'platforms.json')
     try:
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -43,7 +43,7 @@ PLATFORMS = _load_platforms()
 # 讀取 emulators.json
 # ==========================================
 def _load_emulators():
-    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'asset', 'data', 'emulators.json')
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'emulators.json')
     try:
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -56,15 +56,33 @@ EMULATORS = _load_emulators()
 
 def _save_platforms(data: dict):
     """將 dict 寫回 platforms.json"""
-    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'asset', 'data', 'platforms.json')
+    if getattr(sys, 'frozen', False):
+        # 發佈模式：exe 同目錄
+        path = os.path.join(os.path.dirname(sys.executable), 'platforms.json')
+    else:
+        # 開發模式：langforge/asset/data/
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'asset', 'data', 'platforms.json'
+        )
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         json.dump({'platforms': data}, f, ensure_ascii=False, indent=2)
 
 def _save_emulators(data: dict):
     """將 dict 寫回 emulators.json"""
-    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'asset', 'data', 'emulators.json')
+    if getattr(sys, 'frozen', False):
+        # 發佈模式：exe 同目錄
+        path = os.path.join(os.path.dirname(sys.executable), 'emulators.json')
+    else:
+        # 開發模式：langforge/asset/data/
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'asset', 'data', 'emulators.json'
+        )
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
-        json.dump({'platforms': data}, f, ensure_ascii=False, indent=2)
+        json.dump({'emulators': data}, f, ensure_ascii=False, indent=2)
 
 
 
@@ -77,7 +95,7 @@ def _load_app_icon(window) -> None:
     優先使用 iconbitmap（Windows 原生 .ico 支援）；
     失敗時退回 iconphoto（跨平台備案，以 Pillow 轉換）。
     """
-    ico_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'asset', 'icons', 'langforgefavicon256x256.png')
+    ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'favicon.ico')
     if not os.path.exists(ico_path):
         return
     try:
@@ -98,7 +116,7 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = 'V1.0.1-beta.5'
+ABOUT_VERSION = 'V1.0.1-beta.6'
 ABOUT_GITHUB  = 'https://github.com/toyakyo'
 ABOUT_AUTHOR  = 'Toya Kyo'
 ABOUT_LICENSE = 'Copyright © 2026 GoOnSoft. All rights reserved.'
@@ -121,6 +139,76 @@ UI_STRINGS = {
         'rb_engine_cloud':  '☁ 雲端引擎',
         'rb_engine_local':  '🦙 本地引擎 (OLLAMA)',
         'rb_engine_ocr':    '🔍 本地OCR+Google翻譯',
+        'msg_lang_changed_zh': '介面語言已設為中文，重新啟動後生效。',
+        'msg_delete_cat': '刪除主類別「{cat}」及其所有平台？',
+        'status_save_fail': '儲存失敗: {err}',
+        'lbl_ollama_hint': '（建議 30～120，依模型大小調整）',
+        'title_translate': '翻譯結果',
+        'title_guide': '攻略資訊',
+        'playback_done': '播放完畢',
+        'btn_pause': '⏸ 暫停',
+        'btn_resume': '▶ 繼續',
+        'title_plat_editor': '平台編輯器',
+        'lbl_plat_cat': '遊戲平台 (platforms.json)',
+        'lbl_emu_cat': '模擬器 (emulators.json)',
+        'lf_main_cat': '主類別',
+        'lf_platform_list': '平台',
+        'btn_add_short': '新增',
+        'btn_rename': '改名',
+        'btn_delete_short': '刪除',
+        'btn_close': '關閉',
+        'btn_save': '儲存',
+        'status_saved': '✓ 已儲存',
+        'status_no_win_detect': '未偵測到有效視窗',
+        'progress_unknown': '（無法辨識進度）',
+        'lbl_timeout_hint': '（建議 30～120，依模型大小調整）',
+        'status_hotkey_set_fail':   '快捷鍵設定失敗: {e}',
+        'status_guide_hotkey_fail2':'攻略快捷鍵設定失敗: {e}',
+        'status_win_exists':        '目標視窗已存在: {name}',
+        'status_img_loading':       '讀取圖片中...',
+        'status_img_load_fail':     '圖片讀取失敗',
+        'status_no_target_win':     '請先設定目標視窗標題',
+        'status_quota_exhausted':   '所有模型額度已用完',
+        'status_auto_switched':     '自動切換至 {model}',
+        'status_no_key':            '請輸入 API Key',
+        'status_no_key_eng':        '請輸入 {engine} API Key',
+        'status_guide_json_fail':   '攻略 JSON 解析失敗（詳見 PowerShell）',
+        'status_429_wait':          '429 限流，建議等 {sec} 秒後重試',
+        'status_key_invalid':       'API Key 無效或過期，請確認 Key',
+        'status_key_invalid2':      'API Key 無效或過期',
+        'status_key_invalid_eng':   'API Key 無效或過期，請確認 {engine} Key',
+        'status_combo_done':        '翻譯+攻略完成',
+        'status_json_fail':         'JSON 解析失敗（詳見 PowerShell）',
+        'status_error':             '錯誤: {msg}',
+        'status_parse_error':       '解析錯誤: {msg}',
+        'status_done':              '翻譯完成',
+        'status_ocr_running':       'OCR 辨識中...',
+        'status_ocr_no_easyocr':    '缺少 easyocr，請執行 pip install easyocr',
+        'status_ocr_no_text':       'OCR 未偵測到可信文字',
+        'status_ocr_fail':          'OCR 失敗: {msg}',
+        'status_gt_fail':           'Google 翻譯失敗: {msg}',
+        'status_ocr_no_result':     'OCR 無有效結果',
+        'status_ocr_done':          'OCR 翻譯完成（{n} 段）',
+        'status_bad_request':       '請求格式錯誤，該模型可能不支援圖片',
+        'status_server_error':      '{engine} 伺服器內部錯誤，請稍後重試',
+        'status_network_fail':      '網路連線失敗，請檢查網路',
+        'status_api_fail':          'API 失敗: {msg}',
+        'lbl_queue':            '佇列',
+        'lbl_cooldown':         '冷卻',
+        'status_cooling':       '{model} 冷卻中，請等 {wait} 秒',
+        'status_analyzing':     '{engine} ({model}) 分析中...',
+        'status_combo_analyzing': '{engine} ({model}) 翻譯+攻略分析中...',
+        'status_ocr_translating': 'OCR → Google 翻譯中...',
+        'status_ollama_running':  'OLLAMA 推理中... (timeout={t}s)',
+        'status_guide_done':    '攻略分析完成',
+        'status_guide_fail':    '攻略分析失敗',
+        'status_combined_fail': '合併請求失敗',
+        'status_win_missing':   '找不到目標視窗',
+        'status_pkg_missing':   '缺少套件: {pkg}，請執行 pip install {pkg}',
+        'status_429':           '429 配額超限，請稍後或換模型',
+        'status_503':           '{model} 服務繁忙，請稍後重試',
+        'status_503b':          '{model} 服務繁忙，請稍後重試或換模型',
+        'status_default_ok':    '預設已儲存：{engine} / {model}',
         'all_games': '全部遊戲',
         'all_windows': '全部視窗',
         'all_platforms': '全部平台',
@@ -296,6 +384,76 @@ UI_STRINGS = {
         'rb_engine_cloud':  '☁ Cloud Engine',
         'rb_engine_local':  '🦙 Local (OLLAMA)',
         'rb_engine_ocr':    '🔍 Local OCR+Google Translate',
+        'msg_lang_changed_zh': 'UI language set to Chinese. Restart to apply.',
+        'msg_delete_cat': 'Delete category "{cat}" and all its platforms?',
+        'status_save_fail': 'Save failed: {err}',
+        'lbl_ollama_hint': '(Recommended 30~120, adjust by model size)',
+        'title_translate': 'Translation',
+        'title_guide': 'Guide Info',
+        'playback_done': 'Playback Complete',
+        'btn_pause': '⏸ Pause',
+        'btn_resume': '▶ Resume',
+        'title_plat_editor': 'Platform Editor',
+        'lbl_plat_cat': 'Game Platforms (platforms.json)',
+        'lbl_emu_cat': 'Emulators (emulators.json)',
+        'lf_main_cat': 'Category',
+        'lf_platform_list': 'Platform',
+        'btn_add_short': 'Add',
+        'btn_rename': 'Rename',
+        'btn_delete_short': 'Delete',
+        'btn_close': 'Close',
+        'btn_save': 'Save',
+        'status_saved': '✓ Saved',
+        'status_no_win_detect': 'No valid window detected',
+        'progress_unknown': '(Progress unrecognized)',
+        'lbl_timeout_hint': '(Recommended 30~120, adjust by model size)',
+        'status_hotkey_set_fail':   'Hotkey setup failed: {e}',
+        'status_guide_hotkey_fail2':'Guide hotkey setup failed: {e}',
+        'status_win_exists':        'Window already exists: {name}',
+        'status_img_loading':       'Loading image...',
+        'status_img_load_fail':     'Failed to load image',
+        'status_no_target_win':     'Please set target window title first',
+        'status_quota_exhausted':   'All model quotas exhausted',
+        'status_auto_switched':     'Auto-switched to {model}',
+        'status_no_key':            'Please enter API Key',
+        'status_no_key_eng':        'Please enter {engine} API Key',
+        'status_guide_json_fail':   'Guide JSON parse failed (see PowerShell)',
+        'status_429_wait':          '429 rate limit, retry after {sec}s',
+        'status_key_invalid':       'API Key invalid or expired, please verify',
+        'status_key_invalid2':      'API Key invalid or expired',
+        'status_key_invalid_eng':   'API Key invalid or expired, check {engine} Key',
+        'status_combo_done':        'Translate+Guide done',
+        'status_json_fail':         'JSON parse failed (see PowerShell)',
+        'status_error':             'Error: {msg}',
+        'status_parse_error':       'Parse error: {msg}',
+        'status_done':              'Translation done',
+        'status_ocr_running':       'OCR analyzing...',
+        'status_ocr_no_easyocr':    'Missing easyocr, run pip install easyocr',
+        'status_ocr_no_text':       'No confident text detected by OCR',
+        'status_ocr_fail':          'OCR failed: {msg}',
+        'status_gt_fail':           'Google Translate failed: {msg}',
+        'status_ocr_no_result':     'OCR no valid results',
+        'status_ocr_done':          'OCR done ({n} segments)',
+        'status_bad_request':       'Bad request format, model may not support images',
+        'status_server_error':      '{engine} server error, try later',
+        'status_network_fail':      'Network connection failed, check your network',
+        'status_api_fail':          'API failed: {msg}',
+        'lbl_queue':            'Queue',
+        'lbl_cooldown':         'Cooldown',
+        'status_cooling':       '{model} cooldown, wait {wait}s',
+        'status_analyzing':     '{engine} ({model}) analyzing...',
+        'status_combo_analyzing': '{engine} ({model}) translate+guide...',
+        'status_ocr_translating': 'OCR → Google Translate...',
+        'status_ollama_running':  'OLLAMA running... (timeout={t}s)',
+        'status_guide_done':    'Guide analysis done',
+        'status_guide_fail':    'Guide analysis failed',
+        'status_combined_fail': 'Combined request failed',
+        'status_win_missing':   'Target window not found',
+        'status_pkg_missing':   'Missing package: {pkg}, run pip install {pkg}',
+        'status_429':           '429 quota exceeded, try later or switch model',
+        'status_503':           '{model} busy, try later',
+        'status_503b':          '{model} busy, try later or switch model',
+        'status_default_ok':    'Default saved: {engine} / {model}',
         'all_games': 'All Games',
         'all_windows': 'All Windows',
         'all_platforms': 'All Platforms',
@@ -548,8 +706,8 @@ REQUEST_QUEUE_MAXSIZE = 10
 _request_queue = queue.Queue(maxsize=REQUEST_QUEUE_MAXSIZE)
 
 KEY_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    'config',
+    os.path.dirname(sys.executable) if getattr(sys, 'frozen', False)
+    else os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     'configs.json'
 )
 DEFAULT_HOTKEY = 'ctrl+f2'
@@ -560,9 +718,6 @@ COOLDOWN_SECONDS_DEFAULT = 13
 # API Key 混淆（XOR + base64，以機器 ID 為 salt）
 # ==========================================
 def _get_machine_salt() -> bytes:
-    """取得機器唯一識別碼作為 XOR salt（48 bytes）。
-    優先使用 Windows MachineGuid，fallback 至 MAC address。
-    """
     salt_src = ''
     try:
         import winreg
@@ -579,14 +734,12 @@ def _get_machine_salt() -> bytes:
             salt_src = str(uuid.getnode())
         except Exception:
             salt_src = 'LangForge-fallback-salt-2026'
-    # 將 salt_src 重複延伸至 48 bytes
     raw = salt_src.encode('utf-8')
     return (raw * (48 // len(raw) + 1))[:48]
 
-_OBFUSCATED_PREFIX = 'LF1:'   # 版本旗標，區分混淆值與舊版明文
+_OBFUSCATED_PREFIX = 'LF1:'
 
 def obfuscate_key(plaintext: str) -> str:
-    """明文 API Key → XOR 混淆後 base64 字串（含版本前綴），存入 configs.json。"""
     if not plaintext:
         return ''
     import base64
@@ -596,14 +749,10 @@ def obfuscate_key(plaintext: str) -> str:
     return _OBFUSCATED_PREFIX + base64.b64encode(xored).decode('ascii')
 
 def deobfuscate_key(encoded: str) -> str:
-    """configs.json 讀出的值 → 還原明文 API Key。
-    有 LF1: 前綴 → 新版混淆值，解碼還原。
-    無前綴 → 舊版明文，直接回傳（向下相容）。
-    """
     if not encoded:
         return ''
     if not encoded.startswith(_OBFUSCATED_PREFIX):
-        return encoded   # 舊版明文，直接使用
+        return encoded
     import base64
     try:
         xored = base64.b64decode(encoded[len(_OBFUSCATED_PREFIX):])
@@ -611,7 +760,7 @@ def deobfuscate_key(encoded: str) -> str:
         plain = bytes(b ^ salt[i % len(salt)] for i, b in enumerate(xored))
         return plain.decode('utf-8')
     except Exception:
-        return encoded   # 解碼異常，fallback 原值
+        return encoded
 STABLE_CHECK_INTERVAL_MS = 500   # 每次截圖間隔
 STABLE_COUNT_DEFAULT      = 4    # 連續穩定次數門檻（4×500ms=2秒）
 STABLE_DIFF_DEFAULT       = 10   # 像素差異平均值門檻（0~255）
@@ -734,6 +883,8 @@ MODEL_RPM = {
 # 引擎定義（順序：Gemini → Groq → Mistral → OpenAI → Claude）
 # ══════════════════════════════════════════
 ENGINE_ORDER = ['gemini', 'groq', 'mistral', 'openai', 'claude']
+ENGINE_KEY_BY_DISPLAY = {}  # 由 ENGINE_DISPLAY 建立後填入
+
 ENGINE_DISPLAY = {
     'gemini':  'Gemini',
     'groq':    'Groq',
@@ -1470,7 +1621,7 @@ class _Tooltip:
 class LangForgeApp:
     def __init__(self, root):
         self.root = root
-        self.root.title('LangForge  V1.0.1-beta.5')
+        self.root.title('LangForge  V1.0.1-beta.6')
         _load_app_icon(self.root)
 
         self.config = load_config()
@@ -1500,7 +1651,7 @@ class LangForgeApp:
         saved_screen = self.config.get('main_screen', 1)
         _mon = next((m for m in self._monitors if m['index'] == saved_screen),
                     self._monitors[0])
-        main_w, main_h = 580, 750
+        main_w, main_h = 580, 800
         # 固定啟動位置 10,10，不記憶上次位置
         self.root.geometry(f'{main_w}x{main_h}+10+10')
         self.root.deiconify()  # 設好位置後才顯示
@@ -1648,16 +1799,22 @@ class LangForgeApp:
         # ── 雲端引擎區塊 ──
         self.cloud_frame = ttk.Frame(self.engine_container)
 
-        # 五引擎單選
-        self.engine_var = tk.StringVar(value='gemini')
-        engine_rb_frame = ttk.Frame(self.cloud_frame)
-        engine_rb_frame.pack(fill='x', pady=2)
-        for eng in ENGINE_ORDER:
-            ttk.Radiobutton(
-                engine_rb_frame, text=ENGINE_DISPLAY[eng],
-                variable=self.engine_var, value=eng,
-                command=self._on_engine_change
-            ).pack(side='left', padx=(0, 6))
+        # 引擎下拉選單
+        _saved_eng = self.config.get('default_engine', 'gemini')
+        if _saved_eng not in ENGINE_ORDER:
+            _saved_eng = 'gemini'
+        self.engine_var = tk.StringVar(value=_saved_eng)
+        self._engine_display_var = tk.StringVar(value=ENGINE_DISPLAY.get(_saved_eng, _saved_eng))
+        engine_row = ttk.Frame(self.cloud_frame)
+        engine_row.pack(fill='x', pady=2)
+        ttk.Label(engine_row, text=S('lbl_engine'), font=('Arial', 9)).pack(side='left')
+        self.engine_combo = ttk.Combobox(
+            engine_row, textvariable=self._engine_display_var,
+            values=[ENGINE_DISPLAY[e] for e in ENGINE_ORDER],
+            state='readonly', width=20)
+        self.engine_combo.pack(side='left', padx=(6, 0))
+        self.engine_combo.bind('<<ComboboxSelected>>', lambda e: self._on_engine_combo_change())
+
 
         # API Key
         self.key_label = ttk.Label(self.cloud_frame, text='Gemini API Key:', font=('Arial', 9, 'bold'))
@@ -1733,7 +1890,7 @@ class LangForgeApp:
             self.ollama_timeout_var = tk.StringVar(
                 value=str(self.config.get('ollama_timeout', OLLAMA_TIMEOUT)))
             ttk.Entry(timeout_row, textvariable=self.ollama_timeout_var, width=6).pack(side='left', padx=4)
-            ttk.Label(timeout_row, text='（建議 30～120，依模型大小調整）',
+            ttk.Label(timeout_row, text=S('lbl_timeout_hint'),
                       font=('Arial', 8), foreground='gray').pack(side='left')
             self.ollama_timeout_var.trace_add('write', lambda *_: self._debounce_save_config())
         else:
@@ -2316,7 +2473,7 @@ class LangForgeApp:
         # 翻譯結果視窗
         # ═══════════════════════════════════
         self.display = tk.Toplevel(root)
-        self.display.title('翻譯結果')
+        self.display.title(S('title_translate'))
         _load_app_icon(self.display)
         self.display.attributes('-topmost', True)
         self.display.configure(bg='black')
@@ -2361,7 +2518,7 @@ class LangForgeApp:
         # 攻略資訊視窗
         # ═══════════════════════════════════
         self.guide_display = tk.Toplevel(root)
-        self.guide_display.title('攻略資訊')
+        self.guide_display.title(S('title_guide'))
         _load_app_icon(self.guide_display)
         self.guide_display.attributes('-topmost', True)
         self.guide_display.configure(bg='#1a1a2e')
@@ -2521,7 +2678,7 @@ class LangForgeApp:
         save_config(self.config)
         from tkinter import messagebox
         if lang == 'zh':
-            messagebox.showinfo('LangForge', '介面語言已設為中文，重新啟動後生效。')
+            messagebox.showinfo('LangForge', S('msg_lang_changed_zh'))
         else:
             messagebox.showinfo('LangForge', 'UI language set to English. Please restart to apply.')
 
@@ -2804,7 +2961,7 @@ class LangForgeApp:
         else:
             # 場次已結束：播到最後一幀就停止
             if self._playback_seq > self._session_seq:
-                self._pb_info_label.config(text='播放完畢')
+                self._pb_info_label.config(text=S('playback_done'))
                 return
 
         import sqlite3
@@ -3062,7 +3219,7 @@ class LangForgeApp:
         # 播放/暫停 + 停止
         self._pb_paused    = False
         self._pb_pause_btn = tk.Button(
-            btn_frame_pb, text='⏸ 暫停',
+            btn_frame_pb, text=S('btn_pause'),
             command=self._t6_toggle_pause,
             bg='#333', fg='white', relief='flat', width=10)
         self._pb_pause_btn.pack(side='left', pady=4, padx=(8, 4))
@@ -3098,7 +3255,7 @@ class LangForgeApp:
         self._pb_paused = not self._pb_paused
         if hasattr(self, '_pb_pause_btn') and self._pb_pause_btn.winfo_exists():
             self._pb_pause_btn.config(
-                text='▶ 繼續' if self._pb_paused else '⏸ 暫停')
+                text=S('btn_resume') if self._pb_paused else S('btn_pause'))
         if not self._pb_paused:
             if self._playback_job:
                 self.root.after_cancel(self._playback_job)
@@ -3169,7 +3326,7 @@ class LangForgeApp:
         """開啟平台/模擬器編輯器視窗"""
         global PLATFORMS, EMULATORS
         win = tk.Toplevel(self.root)
-        win.title('平台編輯器')
+        win.title(S('title_plat_editor'))
         win.geometry('640x480')
         win.resizable(True, True)
         _load_app_icon(win)
@@ -3185,9 +3342,9 @@ class LangForgeApp:
         top = ttk.Frame(win, padding=6)
         top.pack(fill='x')
         mode_var = tk.StringVar(value='platform')
-        ttk.Radiobutton(top, text='遊戲平台 (platforms.json)',
+        ttk.Radiobutton(top, text=S('lbl_plat_cat'),
                         variable=mode_var, value='platform').pack(side='left')
-        ttk.Radiobutton(top, text='模擬器 (emulators.json)',
+        ttk.Radiobutton(top, text=S('lbl_emu_cat'),
                         variable=mode_var, value='emulator').pack(side='left', padx=(12, 0))
 
         # ── 中段：左欄（主類別）+ 右欄（平台清單）──
@@ -3195,31 +3352,31 @@ class LangForgeApp:
         mid.pack(fill='both', expand=True)
 
         # 左欄
-        left = ttk.LabelFrame(mid, text='主類別', padding=4)
+        left = ttk.LabelFrame(mid, text=S('lf_main_cat'), padding=4)
         left.pack(side='left', fill='y', padx=(0, 4))
         cat_lb = tk.Listbox(left, width=18, selectmode='single', exportselection=False)
         cat_lb.pack(fill='both', expand=True)
         cat_btn_row = ttk.Frame(left)
         cat_btn_row.pack(fill='x', pady=(4, 0))
-        ttk.Button(cat_btn_row, text='新增', width=6,
+        ttk.Button(cat_btn_row, text=S('btn_add_short'), width=6,
                    command=lambda: _add_cat()).pack(side='left')
-        ttk.Button(cat_btn_row, text='改名', width=6,
+        ttk.Button(cat_btn_row, text=S('btn_rename'), width=6,
                    command=lambda: _rename_cat()).pack(side='left', padx=2)
-        ttk.Button(cat_btn_row, text='刪除', width=6,
+        ttk.Button(cat_btn_row, text=S('btn_delete_short'), width=6,
                    command=lambda: _del_cat()).pack(side='left')
 
         # 右欄
-        right = ttk.LabelFrame(mid, text='平台', padding=4)
+        right = ttk.LabelFrame(mid, text=S('lf_platform_list'), padding=4)
         right.pack(side='left', fill='both', expand=True)
         plat_lb = tk.Listbox(right, selectmode='single', exportselection=False)
         plat_lb.pack(fill='both', expand=True)
         plat_btn_row = ttk.Frame(right)
         plat_btn_row.pack(fill='x', pady=(4, 0))
-        ttk.Button(plat_btn_row, text='新增', width=6,
+        ttk.Button(plat_btn_row, text=S('btn_add_short'), width=6,
                    command=lambda: _add_plat()).pack(side='left')
-        ttk.Button(plat_btn_row, text='改名', width=6,
+        ttk.Button(plat_btn_row, text=S('btn_rename'), width=6,
                    command=lambda: _rename_plat()).pack(side='left', padx=2)
-        ttk.Button(plat_btn_row, text='刪除', width=6,
+        ttk.Button(plat_btn_row, text=S('btn_delete_short'), width=6,
                    command=lambda: _del_plat()).pack(side='left')
         ttk.Button(plat_btn_row, text='↑', width=3,
                    command=lambda: _move_plat(-1)).pack(side='left', padx=(8, 0))
@@ -3231,8 +3388,8 @@ class LangForgeApp:
         bot.pack(fill='x', side='bottom')
         status_lbl = ttk.Label(bot, text='', foreground='green', font=('Arial', 9))
         status_lbl.pack(side='left')
-        ttk.Button(bot, text='關閉', command=win.destroy).pack(side='right')
-        ttk.Button(bot, text='儲存', command=lambda: _save()).pack(side='right', padx=(0, 6))
+        ttk.Button(bot, text=S('btn_close'), command=win.destroy).pack(side='right')
+        ttk.Button(bot, text=S('btn_save'), command=lambda: _save()).pack(side='right', padx=(0, 6))
 
         # ── 輔助函式 ──
         def _data():
@@ -3273,7 +3430,7 @@ class LangForgeApp:
             def _ok(*_):
                 result[0] = var.get().strip()
                 d.destroy()
-            ttk.Button(d, text='確定', command=_ok).pack(pady=6)
+            ttk.Button(d, text=S('btn_ok'), command=_ok).pack(pady=6)
             e.bind('<Return>', _ok)
             win.wait_window(d)
             return result[0]
@@ -3303,7 +3460,7 @@ class LangForgeApp:
             cat = _cur_cat()
             if not cat:
                 return
-            if tk.messagebox.askyesno('確認', f'刪除主類別「{cat}」及其所有平台？', parent=win):
+            if tk.messagebox.askyesno('LangForge', S('msg_delete_cat').format(cat=cat), parent=win):
                 del _data()[cat]
                 _refresh_cats()
 
@@ -3358,11 +3515,11 @@ class LangForgeApp:
                 EMULATORS = work['emulator']
                 # 重新整理 Tab1 平台下拉
                 self._on_platform_mode_change()
-                status_lbl.config(text='✓ 已儲存', foreground='green')
+                status_lbl.config(text=S('status_saved'), foreground='green')
                 win.after(2000, lambda: status_lbl.config(text=''))
                 log('[PlatformEditor] 儲存完成')
             except Exception as e:
-                status_lbl.config(text=f'儲存失敗: {e}', foreground='red')
+                status_lbl.config(text=S('status_save_fail').format(err=e), foreground='red')
                 log(f'[PlatformEditor] 儲存失敗: {e}')
 
         # 模式切換時刷新
@@ -4184,6 +4341,12 @@ class LangForgeApp:
         self._refresh_quota()
         self._update_cooldown_display()
 
+    def _on_engine_combo_change(self):
+        display = self._engine_display_var.get()
+        eng = next((k for k,v in ENGINE_DISPLAY.items() if v == display), display)
+        self.engine_var.set(eng)
+        self._on_engine_change()
+
     def _on_engine_change(self):
         self._save_current_key_to_config()
         eng = self.engine_var.get()
@@ -4202,7 +4365,7 @@ class LangForgeApp:
         self.config['default_model'] = model
         save_config(self.config)
         log(f'已設定預設引擎: {eng} / {model}')
-        self._set_status(f'預設已儲存：{ENGINE_DISPLAY[eng]} / {model}', 'green')
+        self._set_status(S('status_default_ok').format(engine=ENGINE_DISPLAY[eng], model=model), 'green')
 
     def _save_current_key_to_config(self):
         for eng in ENGINE_ORDER:
@@ -4220,7 +4383,7 @@ class LangForgeApp:
         custom_list = self.config.get(custom_key, [])
         if model_name in custom_list or model_name in ENGINE_MODELS[eng]:
             log(f'模型已存在: {model_name}')
-            self._set_status(f'模型已存在: {model_name}', 'orange')
+            self._set_status(S('status_model_exists').format(model=model_name), 'orange')
             return
         custom_list.append(model_name)
         self.config[custom_key] = custom_list
@@ -4231,7 +4394,7 @@ class LangForgeApp:
         self.custom_model_var.set('')
         self._refresh_quota()
         log(f'已新增自訂模型: {eng} / {model_name}')
-        self._set_status(f'已新增: {model_name}', 'green')
+        self._set_status(S('status_model_added').format(model=model_name), 'green')
 
     def _remove_custom_model(self):
         """移除目前選擇的自訂模型（僅限自訂清單內的可移除）"""
@@ -4248,12 +4411,12 @@ class LangForgeApp:
             self.model_var.set(all_models[0] if all_models else '')
             self._refresh_quota()
             log(f'已移除自訂模型: {eng} / {model_name}')
-            self._set_status(f'已移除: {model_name}', 'green')
+            self._set_status(S('status_model_removed').format(model=model_name), 'green')
         elif model_name in ENGINE_MODELS[eng]:
             log(f'內建模型無法移除: {model_name}')
-            self._set_status(f'內建模型無法移除', 'orange')
+            self._set_status(S('status_builtin_no_remove'), 'orange')
         else:
-            self._set_status(f'找不到可移除的模型', 'orange')
+            self._set_status(S('status_no_model_remove'), 'orange')
 
     def _get_engine_models(self, eng):
         """取得引擎的完整模型清單（內建 + 自訂）"""
@@ -4291,7 +4454,7 @@ class LangForgeApp:
     # ══════════════════════════════════════════
     def _toggle_hotkey(self):
         if not HAS_KEYBOARD:
-            self._set_status('需安裝 keyboard 模組: pip install keyboard', 'red')
+            self._set_status(S('status_keyboard_need'), 'red')
             return
         if self.hotkey_active:
             self._unregister_hotkey()
@@ -4313,7 +4476,7 @@ class LangForgeApp:
             self._update_indicators()
         except Exception as e:
             log(f'快捷鍵註冊失敗: {e}')
-            self._set_status(f'快捷鍵設定失敗: {e}', 'red')
+            self._set_status(S('status_hotkey_set_fail').format(e=e), 'red')
 
     def _unregister_hotkey(self):
         try:
@@ -4340,7 +4503,7 @@ class LangForgeApp:
     # ══════════════════════════════════════════
     def _toggle_guide_hotkey(self):
         if not HAS_KEYBOARD:
-            self._set_status('需安裝 keyboard 模組: pip install keyboard', 'red')
+            self._set_status(S('status_keyboard_need'), 'red')
             return
         if self.guide_hotkey_active:
             self._unregister_guide_hotkey()
@@ -4362,7 +4525,7 @@ class LangForgeApp:
             self._update_indicators()
         except Exception as e:
             log(f'攻略快捷鍵註冊失敗: {e}')
-            self._set_status(f'攻略快捷鍵設定失敗: {e}', 'red')
+            self._set_status(S('status_guide_hotkey_fail2').format(e=e), 'red')
 
     def _unregister_guide_hotkey(self):
         try:
@@ -4582,10 +4745,10 @@ class LangForgeApp:
             self.queue_label.config(text='', foreground='gray')
         elif qsize >= REQUEST_QUEUE_MAXSIZE:
             self.queue_label.config(
-                text=f'佇列 {qsize}/{REQUEST_QUEUE_MAXSIZE} ⚠', foreground='red')
+                text=f'{S("lbl_queue")} {qsize}/{REQUEST_QUEUE_MAXSIZE} ⚠', foreground='red')
         else:
             self.queue_label.config(
-                text=f'佇列 {qsize}/{REQUEST_QUEUE_MAXSIZE}', foreground='steelblue')
+                text=f'{S("lbl_queue")} {qsize}/{REQUEST_QUEUE_MAXSIZE}', foreground='steelblue')
 
     def _on_engine_mode_change(self):
         """引擎模式切換（雲端/本地OLLAMA/OCR）"""
@@ -4680,7 +4843,7 @@ class LangForgeApp:
                 log(f'[PickWindow] 已選取: {title}')
             else:
                 self.pick_hint_label.config(
-                    text='未偵測到有效視窗', foreground='red')
+                    text=S('status_no_win_detect'), foreground='red')
 
             self.pick_window_btn.config(state='normal')
             self.pick_cancel_btn.config(state='disabled')
@@ -4694,14 +4857,14 @@ class LangForgeApp:
             return
         targets = list(self.config.get('target_windows', ['Mesen']))
         if name in targets:
-            self._set_status(f'目標視窗已存在: {name}', 'orange')
+            self._set_status(S('status_win_exists').format(name=name), 'orange')
             return
         targets.append(name)
         self.config['target_windows'] = targets
         save_config(self.config)
         self.target_combo['values'] = targets
         log(f'已新增目標視窗: {name}')
-        self._set_status(f'已新增: {name}', 'green')
+        self._set_status(S('status_win_added').format(name=name), 'green')
 
     def _remove_target_window(self):
         """移除目前選擇的目標視窗"""
@@ -4709,7 +4872,7 @@ class LangForgeApp:
         name = self.title_var.get().strip()
         targets = list(self.config.get('target_windows', ['Mesen']))
         if name not in targets:
-            self._set_status(f'找不到: {name}', 'orange')
+            self._set_status(S('status_win_notfound').format(name=name), 'orange')
             return
         targets.remove(name)
         if not targets:
@@ -4719,7 +4882,7 @@ class LangForgeApp:
         self.target_combo['values'] = targets
         self.title_var.set(targets[0])
         log(f'已移除目標視窗: {name}')
-        self._set_status(f'已移除: {name}', 'green')
+        self._set_status(S('status_win_removed').format(name=name), 'green')
 
     def _start_position_polling(self):
         """每 500ms 偵測 Mesen 視窗位置，自動跟隨移動。
@@ -4747,7 +4910,7 @@ class LangForgeApp:
         if self.engine_mode_var.get() not in ('local', 'ocr') and not self._check_cooldown_and_quota():
             return
         self._start_elapsed_timer()
-        self._set_status('讀取圖片中...', 'orange')
+        self._set_status(S('status_img_loading'), 'orange')
         threading.Thread(target=self._file_translate_task, args=(filepath,), daemon=True).start()
 
     def _file_translate_task(self, filepath):
@@ -4755,7 +4918,7 @@ class LangForgeApp:
             img = Image.open(filepath).convert('RGB')
         except Exception as e:
             log(f"圖片讀取失敗: {e}")
-            self._set_status('圖片讀取失敗', 'red')
+            self._set_status(S('status_img_load_fail'), 'red')
             return
         self._enqueue_task({'type': 'translate', 'image_pil': img,
                             'win_title': '', 'source': 'file'})
@@ -4767,13 +4930,13 @@ class LangForgeApp:
         if self.engine_mode_var.get() not in ('local', 'ocr') and not self._check_cooldown_and_quota():
             return
         self._start_elapsed_timer()
-        self._set_status('擷取畫面中...', 'orange')
+        self._set_status(S('status_capturing'), 'orange')
         threading.Thread(target=self._window_capture_task, daemon=True).start()
 
     def _window_capture_task(self):
         target = self.title_var.get().lower().strip()
         if not target:
-            self._set_status('請先設定目標視窗標題', 'red')
+            self._set_status(S('status_no_target_win'), 'red')
             self._stamp_elapsed()
             return
         hwnd = None
@@ -4785,7 +4948,7 @@ class LangForgeApp:
             return True
         win32gui.EnumWindows(_handler, None)
         if not hwnd:
-            self._set_status('找不到目標視窗', 'red')
+            self._set_status(S('status_win_missing'), 'red')
             return
 
         try:
@@ -4839,7 +5002,7 @@ class LangForgeApp:
         if remaining > 0:
             wait = int(remaining) + 1
             log(f"{model} 冷卻中，請等 {wait} 秒...")
-            self._set_status(f'{model} 冷卻中，請等 {wait} 秒', 'orange')
+            self._set_status(S('status_cooling').format(model=model, wait=wait), 'orange')
             return False
 
         # RPD 用完 → 自動切換下一個可用模型/引擎
@@ -4849,7 +5012,7 @@ class LangForgeApp:
                 # 切換成功，重新檢查新模型的冷卻
                 return self._check_cooldown_and_quota()
             else:
-                self._set_status('所有模型額度已用完', 'red')
+                self._set_status(S('status_quota_exhausted'), 'red')
                 return False
 
         LAST_REQUEST_TIME[model] = time.time()
@@ -4886,7 +5049,7 @@ class LangForgeApp:
                 self.model_var.set(model)
                 self._refresh_quota()
                 self._update_cooldown_display()
-                self._set_status(f'自動切換至 {model}', 'blue')
+                self._set_status(S('status_auto_switched').format(model=model), 'blue')
                 return True
         log('所有引擎/模型的每日額度皆已用完')
         return False
@@ -4906,7 +5069,7 @@ class LangForgeApp:
         if remaining > 0:
             secs = int(remaining) + 1
             self.cooldown_label.config(
-                text=f'⏱ 冷卻: {secs}s',
+                text=f'⏱ {S("lbl_cooldown")}: {secs}s',
                 foreground='orange'
             )
             self._cooldown_timer_id = self.root.after(1000, self._update_cooldown_display)
@@ -4999,7 +5162,7 @@ class LangForgeApp:
             return True
         win32gui.EnumWindows(_handler, None)
         if not hwnd:
-            self._set_status('找不到目標視窗', 'red')
+            self._set_status(S('status_win_missing'), 'red')
             return
 
         try:
@@ -5038,7 +5201,7 @@ class LangForgeApp:
         api_key = self.api_entry.get().strip()
 
         if not api_key:
-            self._set_status('請輸入 API Key', 'red')
+            self._set_status(S('status_no_key'), 'red')
             return
 
         # 從視窗標題取得 ROM 名稱與區域版本
@@ -5057,7 +5220,7 @@ class LangForgeApp:
         display_name = re.sub(r'\s*\((USA|Japan|Europe|J|U|E)\)', '', rom_name).strip()
         guide_prompt = build_guide_prompt(display_name, region, self.tgt_lang_var.get())
 
-        self._set_status('攻略分析中...', 'blue')
+        self._set_status(S('status_guide_analyzing'), 'blue')
         log(f'攻略請求: {model} / {rom_name} ({region})')
 
         try:
@@ -5067,7 +5230,7 @@ class LangForgeApp:
             # 解析結果
             if isinstance(raw, list) and len(raw) > 0:
                 raw = raw[0]
-            progress = raw.get('progress', '（無法辨識進度）') if isinstance(raw, dict) else str(raw)
+            progress = raw.get('progress', S('progress_unknown')) if isinstance(raw, dict) else str(raw)
             guide_list = raw.get('guide', []) if isinstance(raw, dict) else []
 
             # 更新配額
@@ -5080,7 +5243,7 @@ class LangForgeApp:
 
             # 顯示結果到翻譯視窗
             self.root.after(0, lambda: self._render_guide(progress, guide_list, image_pil))
-            self._set_status('攻略分析完成', 'green')
+            self._set_status(S('status_guide_done'), 'green')
             log(f'{model} 攻略分析成功')
 
         except ValueError as e:
@@ -5097,9 +5260,9 @@ class LangForgeApp:
                     self.root.after(0, self._refresh_quota)
                     self._save_guide_log(rom_name, model, progress, guide_list, image_pil=image_pil)
                     self.root.after(0, lambda _p=progress, _g=guide_list: self._render_guide(_p, _g, image_pil))
-                    self._set_status('攻略分析完成', 'green')
+                    self._set_status(S('status_guide_done'), 'green')
                     return
-            self._set_status('攻略 JSON 解析失敗（詳見 PowerShell）', 'red')
+            self._set_status(S('status_guide_json_fail'), 'red')
 
         except Exception as e:
             err_str = str(e)
@@ -5108,19 +5271,19 @@ class LangForgeApp:
             # ── 套件未安裝 ──
             if isinstance(e, (ModuleNotFoundError, ImportError)):
                 missing = err_str.replace("No module named ", "").strip("'")
-                self._set_status(f'缺少套件: {missing}，請執行 pip install {missing}', 'red')
+                self._set_status(S('status_pkg_missing').format(pkg=missing), 'red')
             elif '429' in err_str or 'RESOURCE_EXHAUSTED' in err_str or 'rate_limit' in err_str.lower():
                 retry_sec = self._parse_429_retry_delay(err_str)
                 if retry_sec:
-                    self._set_status(f'429 限流，建議等 {retry_sec} 秒後重試', 'red')
+                    self._set_status(S('status_429_wait').format(sec=retry_sec), 'red')
                 else:
-                    self._set_status('429 配額超限，請稍後或換模型', 'red')
+                    self._set_status(S('status_429'), 'red')
             elif '503' in err_str or 'UNAVAILABLE' in err_str:
-                self._set_status(f'{model} 服務繁忙，請稍後重試或換模型', 'red')
+                self._set_status(S('status_503b').format(model=model), 'red')
             elif '401' in err_str or '403' in err_str or 'UNAUTHENTICATED' in err_str:
-                self._set_status(f'API Key 無效或過期，請確認 Key', 'red')
+                self._set_status(S('status_key_invalid'), 'red')
             else:
-                self._set_status('攻略分析失敗', 'red')
+                self._set_status(S('status_guide_fail'), 'red')
 
 
     def _render_guide(self, progress, guide_list, image_pil):
@@ -5242,7 +5405,7 @@ class LangForgeApp:
         model = self.model_var.get()
 
         if not api_key:
-            self._set_status(f'請輸入 {ENGINE_DISPLAY[eng]} API Key', 'red')
+            self._set_status(S('status_no_key_eng').format(engine=ENGINE_DISPLAY[eng]), 'red')
             return
 
         # 取得 ROM 名稱與區域版本
@@ -5260,7 +5423,7 @@ class LangForgeApp:
 
         combined_prompt = build_combined_prompt(display_name, region, self.src_lang_var.get(), self.tgt_lang_var.get())
 
-        self._set_status(f'{ENGINE_DISPLAY[eng]} ({model}) 翻譯+攻略分析中...', 'orange')
+        self._set_status(S('status_combo_analyzing').format(engine=ENGINE_DISPLAY[eng], model=model), 'orange')
         log(f'合併請求: {model} / {display_name} ({region})')
 
         try:
@@ -5273,7 +5436,7 @@ class LangForgeApp:
 
             if isinstance(raw, dict):
                 translations = raw.get('translations', [])
-                progress = raw.get('progress', '（無法辨識進度）')
+                progress = raw.get('progress', S('progress_unknown'))
                 guide_list = raw.get('guide', [])
             else:
                 translations = []
@@ -5305,7 +5468,7 @@ class LangForgeApp:
             self.root.after(0, lambda _p=progress, _g=guide_list, _img=image_pil:
                 self._render_guide(_p, _g, _img))
 
-            self._set_status('翻譯+攻略完成', 'green')
+            self._set_status(S('status_combo_done'), 'green')
             self._stamp_elapsed()
             log(f'{model} 合併請求成功: {len(translations)} 段翻譯, {len(guide_list)} 條攻略')
 
@@ -5316,10 +5479,10 @@ class LangForgeApp:
                 json_err = parts[1] if len(parts) > 1 else 'unknown'
                 raw_text = parts[2] if len(parts) > 2 else ''
                 self._log_json_debug(eng, model, json_err, raw_text)
-                self._set_status('JSON 解析失敗（詳見 PowerShell）', 'red')
+                self._set_status(S('status_json_fail'), 'red')
             else:
                 log(f'ValueError: {err_msg}')
-                self._set_status(f'錯誤: {err_msg[:60]}', 'red')
+                self._set_status(S('status_error').format(msg=err_msg[:60]), 'red')
 
         except Exception as e:
             err_str = str(e)
@@ -5327,19 +5490,19 @@ class LangForgeApp:
             # ── 套件未安裝 ──
             if isinstance(e, (ModuleNotFoundError, ImportError)):
                 missing = err_str.replace("No module named ", "").strip("'")
-                self._set_status(f'缺少套件: {missing}，請執行 pip install {missing}', 'red')
+                self._set_status(S('status_pkg_missing').format(pkg=missing), 'red')
             elif '429' in err_str or 'RESOURCE_EXHAUSTED' in err_str or 'rate_limit' in err_str.lower():
                 retry_sec = self._parse_429_retry_delay(err_str)
                 if retry_sec:
-                    self._set_status(f'429 限流，建議等 {retry_sec} 秒後重試', 'red')
+                    self._set_status(S('status_429_wait').format(sec=retry_sec), 'red')
                 else:
-                    self._set_status('429 配額超限，請稍後或換模型', 'red')
+                    self._set_status(S('status_429'), 'red')
             elif '503' in err_str or 'UNAVAILABLE' in err_str:
-                self._set_status(f'{model} 服務繁忙，請稍後重試', 'red')
+                self._set_status(S('status_503').format(model=model), 'red')
             elif '401' in err_str or '403' in err_str:
-                self._set_status(f'API Key 無效或過期', 'red')
+                self._set_status(S('status_key_invalid2'), 'red')
             else:
-                self._set_status(f'合併請求失敗', 'red')
+                self._set_status(S('status_combined_fail'), 'red')
 
 
     # ══════════════════════════════════════════
@@ -5351,11 +5514,11 @@ class LangForgeApp:
 
 
         # ── Step1：EasyOCR 辨識 ──
-        self._set_status('OCR 辨識中...', 'orange')
+        self._set_status(S('status_ocr_running'), 'orange')
         try:
             import easyocr
         except ImportError:
-            self._set_status('缺少 easyocr，請執行 pip install easyocr', 'red')
+            self._set_status(S('status_ocr_no_easyocr'), 'red')
             self._stamp_elapsed()
             return
 
@@ -5380,7 +5543,7 @@ class LangForgeApp:
             OCR_CONF_THRESHOLD = 0.1
             ocr_results = [r for r in ocr_results if r[2] >= OCR_CONF_THRESHOLD]
             if not ocr_results:
-                self._set_status('OCR 未偵測到可信文字', 'gray')
+                self._set_status(S('status_ocr_no_text'), 'gray')
                 self._stamp_elapsed()
                 return
             log(f'[OCR] 偵測到 {len(ocr_results)} 個文字區塊（信心值 ≥ {OCR_CONF_THRESHOLD}）')
@@ -5388,12 +5551,12 @@ class LangForgeApp:
             for i, (bbox, text, conf) in enumerate(ocr_results):
                 log(f'[OCR] {i+1}: {text!r} (conf={conf:.2f})')
         except Exception as e:
-            self._set_status(f'OCR 失敗: {str(e)[:60]}', 'red')
+            self._set_status(S('status_ocr_fail').format(msg=str(e)[:60]), 'red')
             self._stamp_elapsed()
             return
 
         # ── Step2：Google 翻譯（urllib，無需 API Key）──
-        self._set_status('OCR → Google 翻譯中...', 'orange')
+        self._set_status(S('status_ocr_translating'), 'orange')
         try:
             src_lang = self.src_lang_var.get()
             tgt_lang = self.tgt_lang_var.get()
@@ -5407,7 +5570,7 @@ class LangForgeApp:
                 log(f'[OCR→GT] {i+1}: {text!r} → {translated!r}')
 
         except Exception as e:
-            self._set_status(f'Google 翻譯失敗: {str(e)[:60]}', 'red')
+            self._set_status(S('status_gt_fail').format(msg=str(e)[:60]), 'red')
             self._stamp_elapsed()
             return
 
@@ -5431,12 +5594,12 @@ class LangForgeApp:
             })
 
         if not segments:
-            self._set_status('OCR 無有效結果', 'gray')
+            self._set_status(S('status_ocr_no_result'), 'gray')
             self._stamp_elapsed()
             return
 
         # ── Step4：儲存 + 渲染（Google 翻譯不消耗引擎配額）──
-        self._set_status(f'OCR 翻譯完成（{len(segments)} 段）', 'green')
+        self._set_status(S('status_ocr_done').format(n=len(segments)), 'green')
         self._stamp_elapsed()
 
         if source == 'capture' and segments:
@@ -5470,7 +5633,7 @@ class LangForgeApp:
                     ollama_timeout = OLLAMA_TIMEOUT
             except (ValueError, AttributeError):
                 ollama_timeout = OLLAMA_TIMEOUT
-            self._set_status(f'OLLAMA 推理中... (timeout={ollama_timeout}s)', 'orange')
+            self._set_status(S('status_ollama_running').format(t=ollama_timeout), 'orange')
             try:
                 res = call_ollama(ollama_model, image_pil, translate_prompt,
                                   timeout=ollama_timeout)
@@ -5485,10 +5648,10 @@ class LangForgeApp:
                     self._log_json_debug('ollama', ollama_model,
                                          parts[1] if len(parts) > 1 else 'unknown',
                                          parts[2] if len(parts) > 2 else '')
-                    self._set_status('JSON 解析失敗（詳見 PowerShell）', 'red')
+                    self._set_status(S('status_json_fail'), 'red')
                 else:
                     log(f'OLLAMA 解析錯誤: {err_msg[:80]}')
-                    self._set_status(f'解析錯誤: {err_msg[:60]}', 'red')
+                    self._set_status(S('status_parse_error').format(msg=err_msg[:60]), 'red')
                 res = []
             except Exception as e:
                 log(f'OLLAMA 呼叫失敗: {e}')
@@ -5502,7 +5665,7 @@ class LangForgeApp:
                 self.config['used_today'][ollama_model] = \
                     self.config['used_today'].get(ollama_model, 0) + 1
                 self._safe_save_config()
-                self._set_status('翻譯完成', 'green')
+                self._set_status(S('status_done'), 'green')
                 self._stamp_elapsed()
                 log(f'OLLAMA ({ollama_model}) 翻譯成功，共 {len(res)} 段')
                 if source == 'capture' and res:
@@ -5520,10 +5683,10 @@ class LangForgeApp:
         model = self.model_var.get()
 
         if not api_key:
-            self._set_status(f'請輸入 {ENGINE_DISPLAY[eng]} API Key', 'red')
+            self._set_status(S('status_no_key_eng').format(engine=ENGINE_DISPLAY[eng]), 'red')
             return
 
-        self._set_status(f'{ENGINE_DISPLAY[eng]} ({model}) 分析中...', 'orange')
+        self._set_status(S('status_analyzing').format(engine=ENGINE_DISPLAY[eng], model=model), 'orange')
 
         try:
             caller = ENGINE_CALLERS[eng]
@@ -5538,10 +5701,10 @@ class LangForgeApp:
                 json_err = parts[1] if len(parts) > 1 else "unknown"
                 raw_text = parts[2] if len(parts) > 2 else ""
                 self._log_json_debug(eng, model, json_err, raw_text)
-                self._set_status('JSON 解析失敗（詳見 PowerShell）', 'red')
+                self._set_status(S('status_json_fail'), 'red')
             else:
                 log(f"ValueError: {err_msg}")
-                self._set_status(f'錯誤: {err_msg[:60]}', 'red')
+                self._set_status(S('status_error').format(msg=err_msg[:60]), 'red')
             res = []
 
         except Exception as e:
@@ -5551,7 +5714,7 @@ class LangForgeApp:
             # ── 套件未安裝 ──
             if isinstance(e, (ModuleNotFoundError, ImportError)):
                 missing = err_str.replace("No module named ", "").strip("'")
-                self._set_status(f'缺少套件: {missing}，請執行 pip install {missing}', 'red')
+                self._set_status(S('status_pkg_missing').format(pkg=missing), 'red')
             elif '429' in err_str or 'RESOURCE_EXHAUSTED' in err_str:
                 if self._is_quota_zero(err_str):
                     MODEL_DAILY_LIMITS[model] = 0
@@ -5560,27 +5723,27 @@ class LangForgeApp:
                 else:
                     retry_sec = self._parse_429_retry_delay(err_str)
                     if retry_sec:
-                        self._set_status(f'429 限流，建議等 {retry_sec} 秒後重試', 'red')
+                        self._set_status(S('status_429_wait').format(sec=retry_sec), 'red')
                     else:
-                        self._set_status('429 配額超限，請稍後或換模型', 'red')
+                        self._set_status(S('status_429'), 'red')
             # ── 503 服務繁忙 ──
             elif '503' in err_str or 'UNAVAILABLE' in err_str or 'high demand' in err_str.lower():
-                self._set_status(f'{model} 服務繁忙，請稍後重試或換模型', 'red')
+                self._set_status(S('status_503b').format(model=model), 'red')
             # ── 401/403 認證失敗 ──
             elif '401' in err_str or '403' in err_str or 'UNAUTHENTICATED' in err_str or 'PERMISSION_DENIED' in err_str:
-                self._set_status(f'API Key 無效或過期，請確認 {ENGINE_DISPLAY[eng]} Key', 'red')
+                self._set_status(S('status_key_invalid_eng').format(engine=ENGINE_DISPLAY[eng]), 'red')
             # ── 400 請求錯誤 ──
             elif '400' in err_str or 'INVALID_ARGUMENT' in err_str:
-                self._set_status('請求格式錯誤，該模型可能不支援圖片', 'red')
+                self._set_status(S('status_bad_request'), 'red')
             # ── 500 內部錯誤 ──
             elif '500' in err_str or 'INTERNAL' in err_str:
-                self._set_status(f'{ENGINE_DISPLAY[eng]} 伺服器內部錯誤，請稍後重試', 'red')
+                self._set_status(S('status_server_error').format(engine=ENGINE_DISPLAY[eng]), 'red')
             # ── 網路問題 ──
             elif 'connect' in err_str.lower() or 'timeout' in err_str.lower() or 'ConnectionError' in err_str:
-                self._set_status('網路連線失敗，請檢查網路', 'red')
+                self._set_status(S('status_network_fail'), 'red')
             # ── 其他 ──
             else:
-                self._set_status(f'API 失敗: {err_str[:60]}', 'red')
+                self._set_status(S('status_api_fail').format(msg=err_str[:60]), 'red')
             res = []
 
         if res:
@@ -5589,7 +5752,7 @@ class LangForgeApp:
             self.config[eng] = api_key
             self._safe_save_config()
             self.root.after(0, self._refresh_quota)
-            self._set_status('翻譯完成', 'green')
+            self._set_status(S('status_done'), 'green')
             self._stamp_elapsed()
             log(f"{model} 翻譯成功，共 {len(res)} 段")
 
@@ -5605,7 +5768,11 @@ class LangForgeApp:
     # ══════════════════════════════════════════
     # 翻譯紀錄儲存（SQLite + 截圖）
     # ══════════════════════════════════════════
-    LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'translation_logs')
+    LOG_DIR = os.path.join(
+        os.path.dirname(sys.executable) if getattr(sys, 'frozen', False)
+        else os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'translation_logs'
+    )
     DB_PATH = os.path.join(LOG_DIR, 'translations.db')
 
     def _init_db(self):
