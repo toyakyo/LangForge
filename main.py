@@ -1,51 +1,41 @@
 """
-LangForge 應用執行入口
-版本：V1.0.1-beta.5
-執行命令：python main.py
+LangForge V1.0.1-beta.7
+應用程式入口點
 """
 
 import sys
-import ctypes
-from pathlib import Path
+import os
 
-# 確保可以導入 langforge 模組
-project_root = Path(__file__).parent.absolute()
-sys.path.insert(0, str(project_root))
-
-
-def setup_dpi_awareness():
-    """設定 Windows DPI 識別（Tkinter 必需）"""
-    try:
-        if sys.platform == "win32":
-            ctypes.windll.shcore.SetProcessDpiAwareness(2)
-    except Exception as e:
-        print(f"警告：DPI 設定失敗：{e}")
-
-
-def main():
-    """應用主入口"""
-    try:
-        # DPI 設定
-        setup_dpi_awareness()
-        
-        # 導入並啟動應用
-        from langforge.core.langforge import LangForgeApp
-        import tkinter as tk
-        
-        root = tk.Tk()
-        app = LangForgeApp(root)
-        root.mainloop()
-    
-    except ImportError as e:
-        print(f"❌ 導入錯誤：{e}")
-        print("請確認 langforge/core/langforge.py 是否存在")
-        sys.exit(1)
-    except Exception as e:
-        print(f"❌ 發生錯誤：{e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-
+# 添加 langforge 模組到路徑
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 if __name__ == "__main__":
-    main()
+    # 從 langforge.core.langforge 導入所有必要的模組和類別
+    import tkinter as tk
+    import ctypes
+    from langforge.core.langforge import (
+        SplashScreen,
+        LangForgeApp,
+        CURRENT_LANG,
+    )
+    
+    # 設定 Per-Monitor DPI Aware
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+    
+    # 建立主視窗
+    root = tk.Tk()
+    root.withdraw()  # 先隱藏
+    root.update_idletasks()
+    
+    # 建立 Splash 和應用程式
+    splash = SplashScreen(root)
+    app = LangForgeApp(root, splash=splash)
+    
+    # 啟動主迴圈
+    root.mainloop()
