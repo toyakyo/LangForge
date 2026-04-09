@@ -1,0 +1,59 @@
+{
+  "gemini": "LF1:cn1LVWpLdxJqUD4NSWNgS2B7YSZFBH4UDmBLVl9TATJUMngmX2Rw",
+  "used_today": {
+    "gemini-2.5-flash": 2,
+    "gemini-2.5-flash-lite": 0,
+    "gemini-3-flash-preview": 0,
+    "gemini-3.1-flash-lite-preview": 0,
+    "meta-llama/llama-4-scout-17b-16e-instruct": 1,
+    "meta-llama/llama-4-maverick-17b-128e-instruct": 0,
+    "pixtral-12b-2409": 0,
+    "mistral-small-latest": 0,
+    "pixtral-large-latest": 0,
+    "gpt-4.1-mini": 0,
+    "gpt-4.1": 0,
+    "gpt-4o": 0,
+    "claude-sonnet-4-5-20250929": 0,
+    "claude-haiku-4-5-20251001": 0,
+    "claude-opus-4-6": 0
+  },
+  "date": "2026-04-01",
+  "groq": "LF1:VEdaaw1/BgxnRREWe19bV19XdFF0IX8UMXFVGlsCdzhGWgETcXFbAVJxbgFaACsmfnpWc3FzQRU=",
+  "mistral": "LF1:XFhEf0FrVQYVBiI9dXpWVwljeDl1C0RMUARiGWtkciQ=",
+  "openai": "LF1:QF8cREtdXk9cBhAid2hwe3dmXSpcD0BBXwdZCQFCaS8BMngVV0RFe1VndlNleRccVV99YFRheBBJUCcge0BbAHpRTkxXTlpXEH0BOg8CBCN8UWRRcVhTX394dQF0AyFRfARkeg4DYTB7bxwjenhWWV9zADBcAFNAJHNZEQt9ey1+IkQSXk50AUgLWlpZBCYzCndLeFJcbTt3UTA+fF1ibAxiSiA=",
+  "claude": "",
+  "hotkey": "ctrl+f2",
+  "crop_top": 30,
+  "text_direction": "horizontal",
+  "winmode": "mesen",
+  "custom_models_gemini": [
+    "gemma-3-27b-it"
+  ],
+  "combo_guide": false,
+  "src_lang": "Japanese(日文)",
+  "tgt_lang": "Traditional Chinese(正體中文)",
+  "default_engine": "gemini",
+  "default_model": "gemini-2.5-flash",
+  "target_windows": [
+    "Mesen",
+    "Ryujinx"
+  ],
+  "platform_category": "Home Consoles",
+  "platform": "NES/FC",
+  "custom_models_groq": [],
+  "custom_models_mistral": [
+    "mistral-medium-latest"
+  ],
+  "main_screen": 1,
+  "platform_mode": "platform",
+  "ui_lang": "zh",
+  "auto_trans": false,
+  "use_ollama": false,
+  "ollama_model": "qwen2.5:1.5b",
+  "ollama_timeout": 60,
+  "engine_mode": "ocr",
+  "ollama_vision_filter": false,
+  "stable_diff": 10,
+  "stable_count": 4,
+  "ocr_lang": "ja"
+}
