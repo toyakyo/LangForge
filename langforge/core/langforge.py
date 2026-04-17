@@ -1,4 +1,4 @@
-"""LangForge V1.0.1-beta.7
+"""LangForge V1.0.1-beta.8
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -12,10 +12,19 @@ License: Copyright © 2026 GoOnSoft. All rights reserved.
 import threading
 import queue
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox
 import sys, os, ctypes, shutil, io, json, time, re, base64
-from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageGrab
-import win32gui, win32con
+import hashlib
+import warnings
+import logging
+import sqlite3
+import copy
+import webbrowser
+import urllib.request
+import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
+from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageGrab, ImageChops
+import win32gui
 
 # ==========================================
 # 三層環境自動偵測
@@ -105,14 +114,12 @@ EMULATORS = _load_emulators()
 
 
 def _save_platforms(data: dict):
-    """將 dict 寫回 platforms.json"""
     path = os.path.join(ASSET_DATA_DIR, "platforms.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"platforms": data}, f, ensure_ascii=False, indent=2)
 
 
 def _save_emulators(data: dict):
-    """將 dict 寫回 emulators.json"""
     path = os.path.join(ASSET_DATA_DIR, "emulators.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"platforms": data}, f, ensure_ascii=False, indent=2)
@@ -127,9 +134,23 @@ def _load_app_icon(window) -> None:
     優先使用 iconbitmap（Windows 原生 .ico 支援）；
     失敗時退回 iconphoto（跨平台備案，以 Pillow 轉換）。
     """
-    ico_path = os.path.join(ASSET_ICONS_DIR, "favicon.ico")
-    if not os.path.exists(ico_path):
+    # 嘗試多個可能的位置
+    possible_paths = [
+        os.path.join(ASSET_ICONS_DIR, "favicon.ico"),  # 模組化結構
+        os.path.join(BASE_DIR, "favicon.ico"),          # 根目錄
+        "favicon.ico",                                   # 當前目錄
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "favicon.ico"),  # 檔案同目錄
+    ]
+    
+    ico_path = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            ico_path = path
+            break
+    
+    if not ico_path:
         return
+    
     try:
         # Windows 原生方式：直接吃 .ico，標題列 + 工作列均生效
         window.iconbitmap(ico_path)
@@ -148,7 +169,8 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.0.1-beta.7"
+ABOUT_VERSION = "V1.0.1-beta.8"
+DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
 ABOUT_LICENSE = "Copyright © 2026 GoOnSoft. All rights reserved."
@@ -235,6 +257,9 @@ UI_STRINGS = {
         "status_combo_analyzing": "{engine} ({model}) 翻譯+攻略分析中...",
         "status_ocr_translating": "OCR → Google 翻譯中...",
         "status_ollama_running": "OLLAMA 推理中... (timeout={t}s)",
+        "status_ollama_done": "OLLAMA 翻譯完成（{n} 段）",
+        "status_ollama_empty": "OLLAMA 推理完成，但未辨識到可翻譯文字",
+        "status_ollama_aborted": "OLLAMA 推理中斷（回應異常）",
         "status_guide_done": "攻略分析完成",
         "status_guide_fail": "攻略分析失敗",
         "status_combined_fail": "合併請求失敗",
@@ -414,6 +439,37 @@ UI_STRINGS = {
         "status_ollama_timeout": "OLLAMA 推理逾時，請增加 Timeout 或換小模型",
         "status_ollama_fail": "OLLAMA 呼叫失敗: {err}",
         "status_ollama_no_model": "請選擇 OLLAMA 模型",
+        # ── 硬編碼補全 ──
+        "lf_actions": "功能",
+        "lbl_hotkeys": "快捷鍵",
+        "lbl_ocr_desc": "本地 EasyOCR 辨識文字座標，Google 翻譯",
+        "session_elapsed": "錄製中  {t}",
+        "session_elapsed_h": "{h}時{m:02d}分{s:02d}秒",
+        "session_elapsed_m": "{m}分{s:02d}秒",
+        "session_elapsed_s": "{s}秒",
+        "title_playback_live": "🎬 LangForge 延遲播放 — {name}",
+        "title_playback_replay": "🎬 回放 — {name}",
+        "lbl_playback_lag": "{ts}  落後 {lag}",
+        "lbl_session_ended_live": "錄製中",
+        "lbl_session_info": "{name}  {start} → {end}  共 {frames} 幀  {plat}",
+        "dlg_confirm_delete": "確認刪除",
+        "dlg_delete_session": "刪除場次「{name}」及所有截圖？此操作不可復原。",
+        "dlg_add_category": "新增主類別",
+        "dlg_rename_category": "改名主類別",
+        "dlg_add_platform": "新增平台",
+        "dlg_rename_platform": "改名平台",
+        "dlg_name_prompt": "名稱:",
+        "dlg_new_name_prompt": "新名稱:",
+        "status_model_list_updated": "已更新 {engine} 模型清單（{n} 個）",
+        "lbl_guide_toggle_on": "開啟",
+        "lbl_guide_toggle_off": "關閉",
+        "dlg_file_title": "選擇圖片檔案",
+        "dlg_file_types_img": "圖片檔案",
+        "dlg_file_types_all": "所有檔案",
+        "guide_section_header": "▎目前攻略內容",
+        "guide_parse_fail": "（解析失敗）",
+        "status_queue_cleared": "已清空佇列（{n} 筆）",
+        "status_queue_empty": "佇列已是空的",
     },
     "en": {
         # ── Tabs ──
@@ -492,6 +548,9 @@ UI_STRINGS = {
         "status_combo_analyzing": "{engine} ({model}) translate+guide...",
         "status_ocr_translating": "OCR → Google Translate...",
         "status_ollama_running": "OLLAMA running... (timeout={t}s)",
+        "status_ollama_done": "OLLAMA done ({n} segments)",
+        "status_ollama_empty": "OLLAMA finished — no translatable text found",
+        "status_ollama_aborted": "OLLAMA aborted (unexpected response)",
         "status_guide_done": "Guide analysis done",
         "status_guide_fail": "Guide analysis failed",
         "status_combined_fail": "Combined request failed",
@@ -708,6 +767,37 @@ UI_STRINGS = {
         "status_ollama_timeout": "OLLAMA timeout — increase Timeout or use a smaller model",
         "status_ollama_fail": "OLLAMA call failed: {err}",
         "status_ollama_no_model": "Please select an OLLAMA model",
+        # ── hardcoded補全 ──
+        "lf_actions": "Actions",
+        "lbl_hotkeys": "Hotkeys",
+        "lbl_ocr_desc": "Local EasyOCR detects text coords, Google Translate",
+        "session_elapsed": "Recording  {t}",
+        "session_elapsed_h": "{h}h {m:02d}m {s:02d}s",
+        "session_elapsed_m": "{m}m {s:02d}s",
+        "session_elapsed_s": "{s}s",
+        "title_playback_live": "🎬 LangForge Live Playback — {name}",
+        "title_playback_replay": "🎬 Replay — {name}",
+        "lbl_playback_lag": "{ts}  behind {lag}",
+        "lbl_session_ended_live": "Recording",
+        "lbl_session_info": "{name}  {start} → {end}  {frames} frames  {plat}",
+        "dlg_confirm_delete": "Confirm Delete",
+        "dlg_delete_session": "Delete session \"{name}\" and all screenshots? This cannot be undone.",
+        "dlg_add_category": "Add Category",
+        "dlg_rename_category": "Rename Category",
+        "dlg_add_platform": "Add Platform",
+        "dlg_rename_platform": "Rename Platform",
+        "dlg_name_prompt": "Name:",
+        "dlg_new_name_prompt": "New name:",
+        "status_model_list_updated": "{engine} model list updated ({n} models)",
+        "lbl_guide_toggle_on": "On",
+        "lbl_guide_toggle_off": "Off",
+        "dlg_file_title": "Select Image File",
+        "dlg_file_types_img": "Image Files",
+        "dlg_file_types_all": "All Files",
+        "guide_section_header": "▎Guide Content",
+        "guide_parse_fail": "(parse failed)",
+        "status_queue_cleared": "Queue cleared ({n} tasks)",
+        "status_queue_empty": "Queue is already empty",
     },
 }
 
@@ -723,7 +813,6 @@ CURRENT_LANG = "zh"  # 預設值；__init__ 讀取 config 後更新
 # 螢幕偵測
 # ==========================================
 def _get_monitors():
-    """回傳所有螢幕資訊 list[dict(index, x, y, w, h, label)]"""
     try:
         import ctypes
 
@@ -855,7 +944,6 @@ LANG_FONT_CANDIDATES = {
 
 
 def _get_font_for_lang(tgt_lang: str, size: int):
-    """依目標語言嘗試載入最合適的字體，失敗則 fallback"""
     import os
 
     # 從 tgt_lang 字串抽取語言關鍵字（去掉括號部分）
@@ -960,7 +1048,6 @@ MODEL_RPM = {
 # 引擎定義（順序：Gemini → Groq → Mistral → OpenAI → Claude → Grok）
 # ══════════════════════════════════════════
 ENGINE_ORDER = ["gemini", "groq", "mistral", "openai", "claude", "grok"]
-ENGINE_KEY_BY_DISPLAY = {}  # 由 ENGINE_DISPLAY 建立後填入
 
 ENGINE_DISPLAY = {
     "gemini": "Gemini",
@@ -1025,7 +1112,6 @@ def log(msg):
 # JSON 配置管理（按模型追蹤配額）
 # ==========================================
 def _get_pacific_date():
-    """取得太平洋時間的日期字串（配額重置基準）"""
     from datetime import datetime, timezone, timedelta
 
     utc_now = datetime.now(timezone.utc)
@@ -1052,7 +1138,6 @@ def _default_used_today():
 
 
 def _detect_ui_lang() -> str:
-    """偵測系統語系，中文系統回傳 'zh'，其餘回傳 'en'。"""
     try:
         import locale
 
@@ -1201,29 +1286,23 @@ def build_combined_prompt(rom_name: str, region: str, src_lang: str, tgt_lang: s
     )
 
 
-# 預設 prompt（執行期由 app 的語言設定動態產生）
-TRANSLATE_PROMPT = build_translate_prompt("Japanese(日文)", "Traditional Chinese(正體中文)")
-GUIDE_PROMPT_TEMPLATE = None  # 已由 build_guide_prompt() 取代
-COMBINED_PROMPT_TEMPLATE = None  # 已由 build_combined_prompt() 取代
-
 
 # ==========================================
 # 五引擎 API 呼叫
 # ==========================================
 def _img_to_jpeg_b64(image_pil):
     buf = io.BytesIO()
-    image_pil.save(buf, format="JPEG", quality=90)
+    image_pil.save(buf, format="JPEG", quality=75)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
 def _img_to_jpeg_bytes(image_pil):
     buf = io.BytesIO()
-    image_pil.save(buf, format="JPEG", quality=90)
+    image_pil.save(buf, format="JPEG", quality=75)
     return buf.getvalue()
 
 
 def _parse_json_response(text):
-    """清理 markdown 包裝並解析 JSON。失敗時嘗試自動修復常見錯誤。"""
     cleaned = re.sub(r"```json\s*|```", "", text).strip()
 
     # 第一次嘗試：直接解析
@@ -1291,12 +1370,50 @@ def _parse_json_response(text):
     raise ValueError(f"JSON_PARSE_FAIL|json.JSONDecodeError|{text}")
 
 
+# ==========================================
+# 雲端引擎 SDK Client 快取（避免每次呼叫重新建立）
+# ==========================================
+_ENGINE_CLIENTS: dict = {}  # key: (engine, api_key)
+
+
+def _get_client(engine: str, api_key: str):
+    key = (engine, api_key)
+    if key in _ENGINE_CLIENTS:
+        return _ENGINE_CLIENTS[key]
+
+    if engine == "gemini":
+        from google import genai
+        client = genai.Client(api_key=api_key, http_options={"api_version": "v1beta"})
+    elif engine == "groq":
+        from groq import Groq
+        client = Groq(api_key=api_key)
+    elif engine == "mistral":
+        from mistralai import Mistral
+        client = Mistral(api_key=api_key)
+    elif engine == "openai":
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+    elif engine == "claude":
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+    elif engine == "grok":
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
+    else:
+        raise ValueError(f"未知引擎: {engine}")
+
+    _ENGINE_CLIENTS[key] = client
+    return client
+
+
+def _invalidate_client(engine: str, api_key: str):
+    _ENGINE_CLIENTS.pop((engine, api_key), None)
+
+
 def call_gemini(api_key, model, image_pil, prompt):
     """Gemini API (google-genai SDK)"""
-    from google import genai
     from google.genai import types
-
-    client = genai.Client(api_key=api_key, http_options={"api_version": "v1beta"})
+    client = _get_client("gemini", api_key)
     img_bytes = _img_to_jpeg_bytes(image_pil)
     response = client.models.generate_content(
         model=model,
@@ -1310,9 +1427,7 @@ def call_gemini(api_key, model, image_pil, prompt):
 
 def call_groq(api_key, model, image_pil, prompt):
     """Groq API (groq SDK — OpenAI 相容 chat.completions + vision)"""
-    from groq import Groq
-
-    client = Groq(api_key=api_key)
+    client = _get_client("groq", api_key)
     img_b64 = _img_to_jpeg_b64(image_pil)
     chat_completion = client.chat.completions.create(
         model=model,
@@ -1323,9 +1438,7 @@ def call_groq(api_key, model, image_pil, prompt):
                     {"type": "text", "text": prompt},
                     {
                         "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{img_b64}",
-                        },
+                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
                     },
                 ],
             }
@@ -1337,9 +1450,7 @@ def call_groq(api_key, model, image_pil, prompt):
 
 def call_mistral(api_key, model, image_pil, prompt):
     """Mistral API (mistralai SDK — chat.complete + vision)"""
-    from mistralai import Mistral
-
-    client = Mistral(api_key=api_key)
+    client = _get_client("mistral", api_key)
     img_b64 = _img_to_jpeg_b64(image_pil)
     chat_response = client.chat.complete(
         model=model,
@@ -1348,10 +1459,7 @@ def call_mistral(api_key, model, image_pil, prompt):
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": f"data:image/jpeg;base64,{img_b64}",
-                    },
+                    {"type": "image_url", "image_url": f"data:image/jpeg;base64,{img_b64}"},
                 ],
             }
         ],
@@ -1362,9 +1470,7 @@ def call_mistral(api_key, model, image_pil, prompt):
 
 def call_openai(api_key, model, image_pil, prompt):
     """OpenAI Responses API (openai SDK)"""
-    from openai import OpenAI
-
-    client = OpenAI(api_key=api_key)
+    client = _get_client("openai", api_key)
     img_b64 = _img_to_jpeg_b64(image_pil)
     response = client.responses.create(
         model=model,
@@ -1383,9 +1489,7 @@ def call_openai(api_key, model, image_pil, prompt):
 
 def call_claude(api_key, model, image_pil, prompt):
     """Claude Messages API (anthropic SDK)"""
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=api_key)
+    client = _get_client("claude", api_key)
     img_b64 = _img_to_jpeg_b64(image_pil)
     message = client.messages.create(
         model=model,
@@ -1405,9 +1509,7 @@ def call_claude(api_key, model, image_pil, prompt):
 
 def call_grok(api_key, model, image_pil, prompt):
     """Grok / xAI API（OpenAI-compatible，endpoint: api.x.ai）"""
-    from openai import OpenAI
-
-    client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
+    client = _get_client("grok", api_key)
     img_b64 = _img_to_jpeg_b64(image_pil)
     response = client.chat.completions.create(
         model=model,
@@ -1416,10 +1518,7 @@ def call_grok(api_key, model, image_pil, prompt):
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
-                    },
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
                 ],
             }
         ],
@@ -1443,11 +1542,12 @@ ENGINE_CALLERS = {
 OLLAMA_BASE_URL = "http://localhost:11434"
 
 GOOGLE_TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single"
+OCR_CONF_THRESHOLD = 0.1      # EasyOCR 最低信心值
+OCR_MAX_WIDTH = 1280          # 送入 EasyOCR 前限制最大寬度（px）
+OCR_TRANSLATE_WORKERS = 8     # Google 翻譯並行執行緒數
 
 
 def _google_translate(text: str, src_lang: str, tgt_lang: str) -> str:
-    """使用 Google 非官方輕量端點翻譯單段文字。失敗時回傳原文。"""
-    import urllib.request, urllib.parse
 
     try:
         params = urllib.parse.urlencode(
@@ -1487,8 +1587,17 @@ LANG_TO_BCP47 = {
 # EasyOCR 不支援 "auto"；"auto" 模式改為常用多語言組合
 _EASYOCR_AUTO_LANGS = ["ja", "en", "ch_sim", "ch_tra", "ko"]
 
+def _resize_for_ocr(image_pil):
+    w, h = image_pil.width, image_pil.height
+    if w <= OCR_MAX_WIDTH:
+        return image_pil, 1.0
+    scale = OCR_MAX_WIDTH / w
+    new_h = int(h * scale)
+    resized = image_pil.resize((OCR_MAX_WIDTH, new_h), Image.LANCZOS)
+    return resized, scale
+
+
 def _bcp47_to_easyocr(bcp47: str) -> list:
-    """將 BCP47 語言碼轉為 EasyOCR 支援的語言碼列表。"""
     if bcp47 == "auto":
         return _EASYOCR_AUTO_LANGS
     code = bcp47.split("-")[0]
@@ -1498,12 +1607,10 @@ def _bcp47_to_easyocr(bcp47: str) -> list:
         return ["ch_tra", "en"] if region.upper() in ("TW", "HK") else ["ch_sim", "en"]
     return [code]
 
-OLLAMA_TIMEOUT = 60  # 預設推理 timeout（秒）；使用者可在 UI 調整
+OLLAMA_TIMEOUT = 180  # 預設推理 timeout（秒）；大型視覺模型（如 QWEN2.5VL）需要較長時間
 
 
 def _detect_ollama_vision_models() -> list:
-    """偵測本地 OLLAMA 所有已安裝的模型，失敗時靜默回傳空列表。"""
-    import urllib.request
 
     try:
         req = urllib.request.Request(f"{OLLAMA_BASE_URL}/api/tags", method="GET")
@@ -1526,13 +1633,21 @@ OLLAMA_VISION_KEYWORDS = [
     # Qwen vision
     "qwen2.5-vl",
     "qwen2.5vl",  # 部分標籤可能省略 dash
+    "qwen3-vl",
+    "qwen3vl",
+    # Google Gemma 視覺系列（gemma3 部分版本、gemma4 全系列均支援視覺）
+    "gemma4",
+    "gemma3",
     # 翻譯+視覺
     "translategemma",
+    # MiniCPM 視覺
+    "minicpm-v",
+    # InternVL
+    "internvl",
 ]
 
 
 def _filter_vision_models(all_models: list) -> list:
-    """從完整模型清單中篩選出具視覺能力的模型。"""
     result = []
     for m in all_models:
         name_lower = m.lower()
@@ -1545,8 +1660,6 @@ def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOU
     """OLLAMA 原生 /api/chat 視覺呼叫。
     以獨立執行緒發送請求，主執行緒等待 timeout 秒；逾時則拋出 TimeoutError。
     """
-    import urllib.request
-    import threading
 
     img_b64 = _img_to_jpeg_b64(image_pil)
     payload = {
@@ -1590,6 +1703,7 @@ def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOU
 
     result = json.loads(outcome)
     text = result.get("message", {}).get("content", "")
+    log(f"[OLLAMA] 原始回應前200字: {text[:200]!r}")
     return _parse_json_response(text)
 
 
@@ -1910,7 +2024,6 @@ def _apply_tk_widgets(widget, t: dict, skip: set = None):
 
 
 def _calc_dir_size_kb(dirpath: str) -> int:
-    """計算目錄內所有檔案的總大小（KB）。"""
     total = 0
     try:
         for root, dirs, files in os.walk(dirpath):
@@ -1957,7 +2070,7 @@ class _Tooltip:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.0.1-beta.7")
+        self.root.title("LangForge  V1.0.1-beta.8")
         _load_app_icon(self.root)
 
         global CURRENT_LANG
@@ -1971,6 +2084,9 @@ class LangForgeApp:
         self._init_db()
         self.last_res = []
 
+        # 語系在 config 讀取後立即套用，確保後續 splash 訊息使用正確語言
+        CURRENT_LANG = self.config.get("ui_lang", "zh")
+
         # 視窗位置快取（需在 _find_mesen_window 第一次呼叫前初始化）
         self._mesen_cache_rect = None
         self._mesen_cache_title = ""
@@ -1979,6 +2095,8 @@ class LangForgeApp:
         self._last_guide_geom = ""
         self._reposition_after_id = None  # Configure debounce timer
         self._position_polling_paused = False  # 自動翻譯開啟時暫停 polling
+        self._position_poll_job = None  # position polling after() job ID
+        self._capture_in_progress = False  # 防止 capture thread 重入
         self._save_config_after_id = None  # trace_add debounce timer
 
         # OLLAMA 本地引擎偵測（非同步，不阻塞啟動）
@@ -2007,7 +2125,6 @@ class LangForgeApp:
         # 選單列
         # ═══════════════════════════════════
         _splash("建立使用者介面..." if CURRENT_LANG != "en" else "Building UI...")
-        import webbrowser
 
         menubar = tk.Menu(self.root)
 
@@ -2279,16 +2396,12 @@ class LangForgeApp:
         self.ocr_frame = ttk.Frame(self.engine_container)
         ocr_inner = ttk.LabelFrame(
             self.ocr_frame,
-            text="🔍 " + ("Local OCR + Google Translate" if CURRENT_LANG == "en" else "本地OCR + Google 翻譯"),
+            text="🔍 " + S("rb_engine_ocr").lstrip("🔍 "),
         )
         ocr_inner.pack(fill="x", padx=2, pady=(0, 4))
         ttk.Label(
             ocr_inner,
-            text=(
-                "Local EasyOCR detects text coords, Google Translate"
-                if CURRENT_LANG == "en"
-                else "本地 EasyOCR 辨識文字座標，Google 翻譯"
-            ),
+            text=S("lbl_ocr_desc"),
             font=("Arial", 8),
             foreground="gray",
         ).pack(anchor="w", padx=6, pady=(4, 2))
@@ -2305,7 +2418,7 @@ class LangForgeApp:
         self._apply_engine_mode(animate=False)
 
         # ── 功能按鈕群組（上2下3排列） ──
-        func_frame = ttk.LabelFrame(tab1, text="功能" if CURRENT_LANG != "en" else "Actions")
+        func_frame = ttk.LabelFrame(tab1, text=S("lf_actions"))
         func_frame.pack(fill="x", pady=(8, 0), padx=2)
 
         func_row1 = ttk.Frame(func_frame)
@@ -2476,7 +2589,7 @@ class LangForgeApp:
         ttk.Radiobutton(wm_row2, text=S("rb_winmode_sides"),  variable=self.winmode_var, value="sides",  command=self._on_winmode_change).pack(side="left", expand=True, fill="x")
 
         # ── 7. 快捷鍵 ──
-        hotkey_lf = ttk.LabelFrame(tab2, text=S("lbl_hotkey").rstrip(":") if CURRENT_LANG != "en" else "Hotkeys")
+        hotkey_lf = ttk.LabelFrame(tab2, text=S("lbl_hotkeys"))
         hotkey_lf.pack(fill="x", pady=(0, 6), padx=2)
 
         hk_row = ttk.Frame(hotkey_lf)
@@ -2982,6 +3095,7 @@ class LangForgeApp:
         self._session_game_name = ""
         self._session_dir = ""
         self._session_running = False
+        self._session_translating = False  # 防止翻譯 thread 堆積
         self._session_capture_job = None
         self._session_prev_gray = None
         self._session_stable_cnt = 0
@@ -3030,7 +3144,6 @@ class LangForgeApp:
             self._t6_load_list()
 
     def _refresh_quota_table(self):
-        """重新整理 Tab3 配額總覽表（Treeview 版）"""
         global CURRENT_LANG
         CURRENT_LANG = self.config.get("ui_lang", "zh")
         used_today = self.config.get("used_today", {})
@@ -3103,7 +3216,6 @@ class LangForgeApp:
             return
         self.config["ui_lang"] = lang
         save_config(self.config)
-        from tkinter import messagebox
 
         if lang == "zh":
             messagebox.showinfo("LangForge", S("msg_lang_changed_zh"))
@@ -3111,7 +3223,6 @@ class LangForgeApp:
             messagebox.showinfo("LangForge", "UI language set to English. Please restart to apply.")
 
     def _switch_theme(self, theme_name: str):
-        """切換深色/淺色主題並立即生效，儲存至 config。"""
         if self.config.get("ui_theme") == theme_name:
             return
         self.config["ui_theme"] = theme_name
@@ -3124,7 +3235,6 @@ class LangForgeApp:
             self.status.config(foreground=t["status_idle"])
 
     def _apply_treeview_tags(self, theme_name: str):
-        """將配額表 Treeview row tags 更新為當前主題色。"""
         if not hasattr(self, "quota_table") or not self.quota_table.winfo_exists():
             return
         t = THEMES.get(theme_name, THEMES["light"])
@@ -3139,14 +3249,12 @@ class LangForgeApp:
     # 場次錄製
     # ══════════════════════════════════════════
     def _on_session_toggle(self):
-        """場次錄製按鈕：開始/結束切換"""
         if self._session_running:
             self._stop_session()
         else:
             self._start_session()
 
     def _start_session(self):
-        import sqlite3, hashlib
 
         game_name = self.title_var.get().strip() or "unknown"
         platform = self.platform_var.get().strip()
@@ -3173,6 +3281,7 @@ class LangForgeApp:
         self._session_prev_gray = None
         self._session_stable_cnt = 0
         self._session_last_hash = ""
+        self._session_translating = False  # 防止翻譯 thread 堆積
 
         self._session_status_label.config(text=S("session_recording"), foreground="red")
 
@@ -3184,7 +3293,6 @@ class LangForgeApp:
         log(f"場次開始: session_id={session_id}, dir={session_dir}")
 
     def _stop_session(self):
-        import sqlite3
 
         self._session_running = False
         if self._session_capture_job:
@@ -3211,7 +3319,6 @@ class LangForgeApp:
         log(f"場次結束: session_id={self._session_id}, 共 {self._session_seq} 幀")
 
     def _session_elapsed_tick(self):
-        """每秒更新錄製計時，只顯示必要的時間單位。"""
         if not self._session_running:
             return
         elapsed = int(time.time() - self._session_start_time)
@@ -3219,12 +3326,12 @@ class LangForgeApp:
         m = (elapsed % 3600) // 60
         s = elapsed % 60
         if h > 0:
-            t_str = f"{h}時{m:02d}分{s:02d}秒"
+            t_str = S("session_elapsed_h").format(h=h, m=m, s=s)
         elif m > 0:
-            t_str = f"{m}分{s:02d}秒"
+            t_str = S("session_elapsed_m").format(m=m, s=s)
         else:
-            t_str = f"{s}秒"
-        self._session_status_label.config(text=f"錄製中  {t_str}", foreground="red")
+            t_str = S("session_elapsed_s").format(s=s)
+        self._session_status_label.config(text=S("session_elapsed").format(t=t_str), foreground="red")
         self._session_elapsed_job = self.root.after(1000, self._session_elapsed_tick)
 
     def _session_capture_loop(self):
@@ -3233,8 +3340,7 @@ class LangForgeApp:
         try:
             image_pil = self._try_capture()
             if image_pil is not None:
-                import hashlib
-                from PIL import ImageChops
+                import numpy as np
 
                 self._session_seq += 1
                 ts_str = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -3242,113 +3348,122 @@ class LangForgeApp:
                 img_path = os.path.join(self._session_dir, filename)
                 image_pil.save(img_path, format="JPEG", quality=85)
 
-                import sqlite3
-
                 rel_path = os.path.relpath(img_path, self.LOG_DIR)
-                conn = sqlite3.connect(self.DB_PATH)
-                conn.execute(
+                self._db_conn.execute(
                     "INSERT INTO frames (session_id, seq, ts, img_path) VALUES (?,?,?,?)",
                     (self._session_id, self._session_seq, ts_str, rel_path),
                 )
-                conn.commit()
-                conn.close()
+                self._db_conn.commit()
 
                 gray = image_pil.convert("L")
                 if self._session_prev_gray is not None:
                     diff = ImageChops.difference(gray, self._session_prev_gray)
-                    pixels = list(getattr(diff, "get_flattened_data", diff.getdata)())
-                    avg_diff = sum(pixels) / len(pixels) if pixels else 999
+                    avg_diff = np.mean(np.array(diff))
                     if avg_diff < SESSION_STABLE_DIFF:
                         self._session_stable_cnt += 1
                     else:
                         self._session_stable_cnt = 0
                     if self._session_stable_cnt >= SESSION_STABLE_COUNT:
                         img_hash = hashlib.md5(image_pil.tobytes()).hexdigest()
-                        if img_hash != self._session_last_hash:
+                        if img_hash != self._session_last_hash and not self._session_translating:
                             self._session_last_hash = img_hash
                             self._session_stable_cnt = 0
+                            self._session_translating = True
                             seq_to_translate = self._session_seq
+                            snap = {
+                                "mode":          self.engine_mode_var.get(),
+                                "src_lang":      self.src_lang_var.get(),
+                                "tgt_lang":      self.tgt_lang_var.get(),
+                                "eng":           self.engine_var.get(),
+                                "api_key":       self.api_entry.get().strip(),
+                                "model":         self.model_var.get(),
+                                "ollama_model":  self.ollama_model_var.get() if hasattr(self, "ollama_model_var") else "",
+                                "ollama_timeout": self.ollama_timeout_var.get() if hasattr(self, "ollama_timeout_var") else str(OLLAMA_TIMEOUT),
+                            }
                             threading.Thread(
-                                target=self._session_translate, args=(image_pil, seq_to_translate), daemon=True
+                                target=self._session_translate, args=(image_pil, seq_to_translate, snap), daemon=True
                             ).start()
                 self._session_prev_gray = gray
         except Exception as e:
             log(f"場次截圖失敗: {e}")
         self._session_capture_job = self.root.after(SESSION_CAPTURE_INTERVAL_MS, self._session_capture_loop)
 
-    def _session_translate(self, image_pil, seq):
-        """場次錄製翻譯：支援雲端/本地OLLAMA/OCR三種模式"""
-        import sqlite3
-
+    def _session_translate(self, image_pil, seq, snap=None):
+        if snap is None:
+            snap = {}
         try:
-            mode = self.engine_mode_var.get()
-            src_lang = self.src_lang_var.get()
-            tgt_lang = self.tgt_lang_var.get()
+            mode     = snap.get("mode",     self.engine_mode_var.get())
+            src_lang = snap.get("src_lang", self.src_lang_var.get())
+            tgt_lang = snap.get("tgt_lang", self.tgt_lang_var.get())
 
             if mode == "ocr":
-                # ── OCR 模式：EasyOCR + Google 翻譯 ──
+                # ── OCR 模式：EasyOCR + Google 翻譯（縮放 + 並行）──
                 import easyocr, numpy as np
 
                 ocr_langs = _bcp47_to_easyocr(LANG_TO_BCP47.get(src_lang, "ja"))
                 if not hasattr(self, "_easyocr_reader") or self._easyocr_langs != ocr_langs:
-                    import warnings, logging
-
                     warnings.filterwarnings("ignore")
                     logging.getLogger("easyocr").setLevel(logging.ERROR)
                     self._easyocr_reader = easyocr.Reader(ocr_langs, gpu=False, verbose=False)
                     self._easyocr_langs = ocr_langs
-                img_np = np.array(image_pil)
+
+                orig_w, orig_h = image_pil.width, image_pil.height
+                ocr_img, scale = _resize_for_ocr(image_pil)
+                img_np = np.array(ocr_img)
                 ocr_results = self._easyocr_reader.readtext(img_np)
-                ocr_results = [r for r in ocr_results if r[2] >= 0.1]
+                ocr_results = [r for r in ocr_results if r[2] >= OCR_CONF_THRESHOLD]
                 if not ocr_results:
                     return
                 src_bcp = LANG_TO_BCP47.get(src_lang, "auto")
                 tgt_bcp = LANG_TO_BCP47.get(tgt_lang, "zh-TW")
-                orig_w, orig_h = image_pil.width, image_pil.height
+                texts = [text for _, text, _ in ocr_results]
+                with ThreadPoolExecutor(max_workers=min(OCR_TRANSLATE_WORKERS, len(texts))) as pool:
+                    translated_list = list(pool.map(
+                        lambda t: _google_translate(t, src_bcp, tgt_bcp), texts
+                    ))
                 result = []
-                for bbox, text, conf in ocr_results:
-                    tw = _google_translate(text, src_bcp, tgt_bcp)
-                    xs = [p[0] for p in bbox]
-                    ys = [p[1] for p in bbox]
-                    result.append(
-                        {
-                            "tw": tw,
-                            "x": round(min(xs) / orig_w, 4),
-                            "y": round(min(ys) / orig_h, 4),
-                            "w": round((max(xs) - min(xs)) / orig_w, 4),
-                            "h": round((max(ys) - min(ys)) / orig_h, 4),
-                        }
-                    )
+                for (bbox, text, conf), tw in zip(ocr_results, translated_list):
+                    xs = [p[0] / scale for p in bbox]
+                    ys = [p[1] / scale for p in bbox]
+                    result.append({
+                        "tw": tw,
+                        "x": round(min(xs) / orig_w, 4),
+                        "y": round(min(ys) / orig_h, 4),
+                        "w": round((max(xs) - min(xs)) / orig_w, 4),
+                        "h": round((max(ys) - min(ys)) / orig_h, 4),
+                    })
                 model = "OCR+GoogleTranslate"
 
             elif mode == "local":
                 # ── OLLAMA 本地模式 ──
-                ollama_model = self.ollama_model_var.get()
+                ollama_model = snap.get("ollama_model", self.ollama_model_var.get() if hasattr(self, "ollama_model_var") else "")
                 if not ollama_model:
                     return
                 prompt = build_translate_prompt(src_lang, tgt_lang)
-                result = call_ollama(
-                    ollama_model, image_pil, prompt, timeout=int(self.ollama_timeout_var.get() or OLLAMA_TIMEOUT)
-                )
+                try:
+                    ollama_timeout = int(snap.get("ollama_timeout", OLLAMA_TIMEOUT))
+                    if ollama_timeout <= 0:
+                        ollama_timeout = OLLAMA_TIMEOUT
+                except (ValueError, TypeError):
+                    ollama_timeout = OLLAMA_TIMEOUT
+                result = call_ollama(ollama_model, image_pil, prompt, timeout=ollama_timeout)
                 model = ollama_model
 
             else:
                 # ── 雲端引擎 ──
-                eng = self.engine_var.get()
-                api_key = self.api_entry.get().strip()
-                model = self.model_var.get()
+                eng     = snap.get("eng",     self.engine_var.get())
+                api_key = snap.get("api_key", self.api_entry.get().strip())
+                model   = snap.get("model",   self.model_var.get())
                 prompt = build_translate_prompt(src_lang, tgt_lang)
                 caller = ENGINE_CALLERS[eng]
                 result = caller(api_key, model, image_pil, prompt)
 
             if isinstance(result, list) and result:
                 trans_json = json.dumps(result, ensure_ascii=False)
-                conn = sqlite3.connect(self.DB_PATH)
-                conn.execute(
+                self._db_conn.execute(
                     "UPDATE frames SET translation=? WHERE session_id=? AND seq=?", (trans_json, self._session_id, seq)
                 )
-                conn.commit()
-                conn.close()
+                self._db_conn.commit()
                 log(f"場次翻譯回寫: session={self._session_id}, seq={seq}")
                 if mode not in ("local", "ocr"):
 
@@ -3360,8 +3475,8 @@ class LangForgeApp:
                     self.root.after(0, _update_quota)
         except Exception as e:
             log(f"場次翻譯失敗: seq={seq}, {e}")
-
-    def _open_playback_window(self):
+        finally:
+            self._session_translating = False
         if self._playback_window and self._playback_window.winfo_exists():
             self._playback_window.lift()
             return
@@ -3369,7 +3484,7 @@ class LangForgeApp:
             return
 
         self._playback_window = tk.Toplevel(self.root)
-        self._playback_window.title(f"🎬 LangForge 延遲播放 — {self._session_game_name}")
+        self._playback_window.title(S("title_playback_live").format(name=self._session_game_name))
         self._playback_window.configure(bg="black")
         self._playback_window.attributes("-topmost", True)
         _load_app_icon(self._playback_window)
@@ -3402,7 +3517,6 @@ class LangForgeApp:
         self._pb_canvas.pack(fill="both", expand=True)
         self._playback_window.protocol("WM_DELETE_WINDOW", self._stop_playback)
 
-        self._btn_playback_open_enabled = True  # 播放按鈕可用（Tab6 回放）
         delay_frames = int(PLAYBACK_DELAY_SECONDS / (SESSION_CAPTURE_INTERVAL_MS / 1000))
         if self._session_seq > delay_frames:
             # 錄製時間充足：從延遲點開始
@@ -3428,15 +3542,12 @@ class LangForgeApp:
                 self._pb_info_label.config(text=S("playback_done"))
                 return
 
-        import sqlite3
 
         try:
-            conn = sqlite3.connect(self.DB_PATH)
-            row = conn.execute(
-                "SELECT ts, img_path, translation FROM frames " "WHERE session_id=? AND seq=?",
+            row = self._db_conn.execute(
+                "SELECT ts, img_path, translation FROM frames WHERE session_id=? AND seq=?",
                 (self._session_id, self._playback_seq),
             ).fetchone()
-            conn.close()
 
             if row:
                 ts_str, img_path, trans_json = row
@@ -3464,7 +3575,7 @@ class LangForgeApp:
                 lag_secs = self._session_seq - self._playback_seq
                 lag_min = lag_secs // 2 // 60
                 lag_sec = (lag_secs // 2) % 60
-                self._pb_info_label.config(text=f"{ts_str}  落後 {lag_min:02d}:{lag_sec:02d}")
+                self._pb_info_label.config(text=S("lbl_playback_lag").format(ts=ts_str, lag=f"{lag_min:02d}:{lag_sec:02d}"))
 
             self._playback_seq += 1
             # 同步進度條（Tab6 回放模式）
@@ -3495,13 +3606,8 @@ class LangForgeApp:
     # Tab6 — 歷史錄製
     # ══════════════════════════════════════════
     def _t6_refresh_games(self):
-        """從 DB 撈 sessions 的不重複遊戲名稱，更新篩選下拉。"""
-        import sqlite3
-
         try:
-            conn = sqlite3.connect(self.DB_PATH)
-            rows = conn.execute("SELECT DISTINCT game_name FROM sessions ORDER BY game_name").fetchall()
-            conn.close()
+            rows = self._db_conn.execute("SELECT DISTINCT game_name FROM sessions ORDER BY game_name").fetchall()
             games = [S("all_games")] + [r[0] for r in rows]
             self.t6_game_combo["values"] = games
             if self.t6_game_var.get() not in games:
@@ -3510,57 +3616,57 @@ class LangForgeApp:
             log(f"[Tab6] refresh games 失敗: {e}")
 
     def _t6_load_list(self):
-        """依篩選條件載入 sessions 清單至 Treeview。"""
-        import sqlite3
-
-        self.t6_tree.delete(*self.t6_tree.get_children())
+        T6_PAGE_SIZE = 500
         try:
-            conn = sqlite3.connect(self.DB_PATH)
             game = self.t6_game_var.get()
             if game == S("all_games"):
-                rows = conn.execute(
+                rows = self._db_conn.execute(
                     "SELECT id, game_name, started_at, total_frames, platform, dir_size_kb "
-                    "FROM sessions ORDER BY started_at DESC"
+                    f"FROM sessions ORDER BY started_at DESC LIMIT {T6_PAGE_SIZE}"
                 ).fetchall()
             else:
-                rows = conn.execute(
+                rows = self._db_conn.execute(
                     "SELECT id, game_name, started_at, total_frames, platform, dir_size_kb "
-                    "FROM sessions WHERE game_name=? ORDER BY started_at DESC",
+                    f"FROM sessions WHERE game_name=? ORDER BY started_at DESC LIMIT {T6_PAGE_SIZE}",
                     (game,),
                 ).fetchall()
-            conn.close()
-            for r in rows:
+
+            new_ids = {str(r[0]) for r in rows}
+            existing_ids = set(self.t6_tree.get_children())
+            for iid in existing_ids - new_ids:
+                self.t6_tree.delete(iid)
+            for r in reversed(rows):
                 sid, gname, started, frames, plat, size_kb = r
                 size_str = f"{size_kb/1024:.1f} MB" if (size_kb or 0) >= 1024 else f"{size_kb or 0} KB"
-                self.t6_tree.insert("", "end", iid=str(sid), values=(gname, started, frames or 0, plat or "", size_str))
+                if str(sid) not in existing_ids:
+                    self.t6_tree.insert("", 0, iid=str(sid), values=(gname, started, frames or 0, plat or "", size_str))
         except Exception as e:
             log(f"[Tab6] load list 失敗: {e}")
 
     def _t6_on_select(self, event=None):
-        """點選場次：顯示第一幀縮圖與資訊。"""
-        import sqlite3
-
         sel = self.t6_tree.selection()
         if not sel:
             return
         sid = int(sel[0])
         self._t6_current_session_id = sid
         try:
-            conn = sqlite3.connect(self.DB_PATH)
-            row = conn.execute(
+            row = self._db_conn.execute(
                 "SELECT img_path, ts FROM frames WHERE session_id=? ORDER BY seq ASC LIMIT 1", (sid,)
             ).fetchone()
-            info = conn.execute(
-                "SELECT game_name, started_at, ended_at, total_frames, platform " "FROM sessions WHERE id=?", (sid,)
+            info = self._db_conn.execute(
+                "SELECT game_name, started_at, ended_at, total_frames, platform FROM sessions WHERE id=?", (sid,)
             ).fetchone()
-            conn.close()
 
             # 資訊標籤
             if info:
                 gname, started, ended, frames, plat = info
-                ended_str = ended or "錄製中" if not ended else ended
+                ended_str = S("lbl_session_ended_live") if not ended else ended
                 self._t6_info_label.config(
-                    text=f'{gname}  {started} → {ended_str}  共 {frames or 0} 幀  {plat or ""}', foreground="steelblue"
+                    text=S("lbl_session_info").format(
+                        name=gname, start=started, end=ended_str,
+                        frames=frames or 0, plat=plat or ""
+                    ),
+                    foreground="steelblue"
                 )
 
             # 縮圖
@@ -3583,9 +3689,6 @@ class LangForgeApp:
             log(f"[Tab6] on_select 失敗: {e}")
 
     def _t6_delete_session(self):
-        """刪除選取的場次（DB 紀錄 + 截圖目錄）。"""
-        import sqlite3
-        from tkinter import messagebox
 
         sel = self.t6_tree.selection()
         if not sel:
@@ -3594,7 +3697,7 @@ class LangForgeApp:
         sid = int(sel[0])
         row = self.t6_tree.item(sel[0], "values")
         game_name = row[0] if row else str(sid)
-        if not messagebox.askyesno("確認刪除", f"刪除場次「{game_name}」及所有截圖？此操作不可復原。"):
+        if not messagebox.askyesno(S("dlg_confirm_delete"), S("dlg_delete_session").format(name=game_name)):
             return
         try:
             conn = sqlite3.connect(self.DB_PATH)
@@ -3608,7 +3711,6 @@ class LangForgeApp:
             if first:
                 img_dir = os.path.dirname(os.path.join(self.LOG_DIR, first[0]))
                 if os.path.isdir(img_dir):
-                    import shutil
 
                     shutil.rmtree(img_dir, ignore_errors=True)
                     # 若父目錄（sessions/）已空，一併移除
@@ -3625,8 +3727,6 @@ class LangForgeApp:
             log(f"[Tab6] delete 失敗: {e}")
 
     def _t6_replay_session(self):
-        """回放選取的場次：開啟播放視窗並以 DB 資料驅動。"""
-        import sqlite3
 
         sid = self._t6_current_session_id
         if not sid:
@@ -3638,9 +3738,9 @@ class LangForgeApp:
 
         # 取場次資訊
         try:
-            conn = sqlite3.connect(self.DB_PATH)
-            info = conn.execute("SELECT game_name, total_frames FROM sessions WHERE id=?", (sid,)).fetchone()
-            conn.close()
+            info = self._db_conn.execute(
+                "SELECT game_name, total_frames FROM sessions WHERE id=?", (sid,)
+            ).fetchone()
         except Exception as e:
             log(f"[Tab6] replay 取資訊失敗: {e}")
             return
@@ -3651,7 +3751,7 @@ class LangForgeApp:
 
         # 建立播放視窗
         self._playback_window = tk.Toplevel(self.root)
-        self._playback_window.title(f"🎬 回放 — {game_name}")
+        self._playback_window.title(S("title_playback_replay").format(name=game_name))
         self._playback_window.configure(bg="black")
         self._playback_window.attributes("-topmost", True)
         _load_app_icon(self._playback_window)
@@ -3718,7 +3818,6 @@ class LangForgeApp:
         self._playback_loop()
 
     def _t6_seek(self, seq: int):
-        """拖動進度條跳到指定幀。"""
         if self._playback_job:
             self.root.after_cancel(self._playback_job)
             self._playback_job = None
@@ -3727,7 +3826,6 @@ class LangForgeApp:
             self._playback_loop()
 
     def _t6_toggle_pause(self):
-        """播放 / 暫停切換。"""
         self._pb_paused = not self._pb_paused
         if hasattr(self, "_pb_pause_btn") and self._pb_pause_btn.winfo_exists():
             self._pb_pause_btn.config(text=S("btn_resume") if self._pb_paused else S("btn_pause"))
@@ -3741,10 +3839,7 @@ class LangForgeApp:
                 self._playback_job = None
 
     def _render_to_image(self, segments, image_pil, out_w, out_h):
-        """將翻譯疊字合成到截圖上，回傳合成後的 PIL.Image（不更新 UI）。"""
-        from PIL import ImageDraw
 
-        PADDING = 8
         try:
             segments = _merge_segments([s for s in segments if isinstance(s, dict)], x_thresh=0.05, y_thresh=0.02)
             items = []
@@ -3762,7 +3857,6 @@ class LangForgeApp:
             font_size = 22
             font = _get_font_for_lang(tgt_lang_str, font_size)
             if font is None:
-                from PIL import ImageFont
 
                 font = ImageFont.load_default()
 
@@ -3795,7 +3889,6 @@ class LangForgeApp:
             return image_pil
 
     def _open_platform_editor(self):
-        """開啟平台/模擬器編輯器視窗"""
         global PLATFORMS, EMULATORS
         win = tk.Toplevel(self.root)
         win.title(S("title_plat_editor"))
@@ -3804,7 +3897,6 @@ class LangForgeApp:
         _load_app_icon(win)
 
         # ── 工作資料（獨立副本，儲存前不影響全域）──
-        import copy
 
         work = {
             "platform": copy.deepcopy(PLATFORMS),
@@ -3903,7 +3995,7 @@ class LangForgeApp:
             return result[0]
 
         def _add_cat():
-            name = _ask("新增主類別", "主類別名稱:")
+            name = _ask(S("dlg_add_category"), S("dlg_name_prompt"))
             if name and name not in _data():
                 _data()[name] = []
                 _refresh_cats()
@@ -3912,7 +4004,7 @@ class LangForgeApp:
             cat = _cur_cat()
             if not cat:
                 return
-            name = _ask("改名主類別", "新名稱:", init=cat)
+            name = _ask(S("dlg_rename_category"), S("dlg_new_name_prompt"), init=cat)
             if name and name != cat and name not in _data():
                 data = _data()
                 items = list(data.items())
@@ -3935,7 +4027,7 @@ class LangForgeApp:
             cat = _cur_cat()
             if not cat:
                 return
-            name = _ask("新增平台", "平台名稱:")
+            name = _ask(S("dlg_add_platform"), S("dlg_name_prompt"))
             if name and name not in _data()[cat]:
                 _data()[cat].append(name)
                 _refresh_plats()
@@ -3946,7 +4038,7 @@ class LangForgeApp:
             if cat is None or idx is None:
                 return
             old = _data()[cat][idx]
-            name = _ask("改名平台", "新名稱:", init=old)
+            name = _ask(S("dlg_rename_platform"), S("dlg_new_name_prompt"), init=old)
             if name and name != old:
                 _data()[cat][idx] = name
                 _refresh_plats()
@@ -3974,7 +4066,6 @@ class LangForgeApp:
 
         def _save():
             global PLATFORMS, EMULATORS
-            import copy
 
             try:
                 _save_platforms(copy.deepcopy(work["platform"]))
@@ -4003,7 +4094,6 @@ class LangForgeApp:
         _refresh_cats()
 
     def _show_about(self):
-        import webbrowser
 
         FB_URL      = "https://www.facebook.com/groups/2150940378645437"
         KOFI_URL    = "https://ko-fi.com/toyakyo"
@@ -4062,11 +4152,9 @@ class LangForgeApp:
     # ══════════════════════════════════════════
 
     def _active_platform_data(self):
-        """依目前模式回傳 PLATFORMS 或 EMULATORS"""
         return EMULATORS if self.platform_mode_var.get() == "emulator" else PLATFORMS
 
     def _on_platform_mode_change(self):
-        """模式切換（遊戲平台/模擬器）：重新載入主類別與平台下拉"""
         data = self._active_platform_data()
         cats = list(data.keys())
         self.platform_category_combo["values"] = cats
@@ -4081,7 +4169,6 @@ class LangForgeApp:
         save_config(self.config)
 
     def _on_platform_category_change(self, event=None):
-        """主類別切換：更新平台下拉並儲存設定"""
         data = self._active_platform_data()
         cat = self.platform_category_var.get()
         plats = data.get(cat, [])
@@ -4092,7 +4179,6 @@ class LangForgeApp:
         save_config(self.config)
 
     def _on_platform_change(self, event=None):
-        """平台切換：儲存設定"""
         self.config["platform"] = self.platform_var.get()
         save_config(self.config)
 
@@ -4101,7 +4187,6 @@ class LangForgeApp:
     # ══════════════════════════════════════════
 
     def _on_t4_fix_mode_change(self):
-        """Tab4 修正平台：模式切換（遊戲平台/模擬器）更新主類別清單"""
         data = PLATFORMS if self.t4_fix_mode_var.get() == "platform" else EMULATORS
         cats = list(data.keys())
         self.t4_fix_category_combo["values"] = cats
@@ -4109,7 +4194,6 @@ class LangForgeApp:
         self._on_t4_fix_category_change()
 
     def _on_t4_fix_category_change(self, event=None):
-        """Tab4 修正平台：主類別切換更新平台下拉"""
         data = PLATFORMS if self.t4_fix_mode_var.get() == "platform" else EMULATORS
         cat = self.t4_fix_category_var.get()
         plats = data.get(cat, [])
@@ -4117,8 +4201,6 @@ class LangForgeApp:
         self.t4_fix_platform_var.set(plats[0] if plats else "")
 
     def _t4_apply_platform(self):
-        """將選取紀錄的 rom_name 之所有紀錄更新 platform"""
-        import sqlite3
 
         sel = self.t4_tree.selection()
         if not sel:
@@ -4144,15 +4226,11 @@ class LangForgeApp:
             log(f"[Tab4] 套用平台失敗: {e}")
 
     def _t4_refresh_games(self):
-        """從 DB 撈不重複 rom_name、target_window、platform 更新篩選下拉"""
-        import sqlite3
-
         try:
-            conn = sqlite3.connect(self.DB_PATH)
+            conn = self._db_conn
             game_rows = conn.execute("SELECT DISTINCT rom_name FROM translations ORDER BY rom_name").fetchall()
-            win_rows = conn.execute("SELECT DISTINCT target_window FROM translations ORDER BY target_window").fetchall()
+            win_rows  = conn.execute("SELECT DISTINCT target_window FROM translations ORDER BY target_window").fetchall()
             plat_rows = conn.execute("SELECT DISTINCT platform FROM translations ORDER BY platform").fetchall()
-            conn.close()
             game_names = [S("all_games")] + [r[0] for r in game_rows]
             self.t4_game_combo["values"] = game_names
             if self.t4_game_var.get() not in game_names:
@@ -4169,9 +4247,7 @@ class LangForgeApp:
             log(f"[Tab4] 刷新遊戲清單失敗: {e}")
 
     def _t4_load_list(self):
-        """依篩選遊戲＋目標視窗＋平台載入翻譯清單到 Treeview"""
-        import sqlite3
-
+        T4_PAGE_SIZE = 500
         try:
             game = self.t4_game_var.get()
             window = self.t4_window_var.get()
@@ -4187,59 +4263,57 @@ class LangForgeApp:
                 conds.append("platform=?")
                 params.append(platform)
             where = ("WHERE " + " AND ".join(conds)) if conds else ""
-            conn = sqlite3.connect(self.DB_PATH)
-            rows = conn.execute(
+            rows = self._db_conn.execute(
                 f"SELECT id, timestamp, model, target_window, platform, rom_name FROM translations "
-                f"{where} ORDER BY id DESC",
+                f"{where} ORDER BY id DESC LIMIT {T4_PAGE_SIZE}",
                 params,
             ).fetchall()
-            conn.close()
-            for item in self.t4_tree.get_children():
-                self.t4_tree.delete(item)
-            for row in rows:
-                self.t4_tree.insert(
-                    "", "end", iid=str(row[0]), values=(row[5] or "", row[1], row[3] or "", row[4] or "")
-                )
+
+            # 差異更新：只刪除不在新結果的舊 row，只新增不在舊 row 的新資料
+            new_ids = {str(row[0]) for row in rows}
+            existing_ids = set(self.t4_tree.get_children())
+            for iid in existing_ids - new_ids:
+                self.t4_tree.delete(iid)
+            for row in reversed(rows):
+                iid = str(row[0])
+                if iid not in existing_ids:
+                    self.t4_tree.insert(
+                        "", 0, iid=iid,
+                        values=(row[5] or "", row[1], row[3] or "", row[4] or "")
+                    )
         except Exception as e:
             log(f"[Tab4] 載入清單失敗: {e}")
 
     def _t4_on_select(self, event):
-        """Treeview 點選：載入截圖 + 譯文"""
         sel = self.t4_tree.selection()
         if not sel:
             return
         db_id = int(sel[0])
         self._t4_current_db_id = db_id
-        import sqlite3
-
+        self._t4_render_cache = None  # 切換紀錄時清除圖片快取
         try:
-            conn = sqlite3.connect(self.DB_PATH)
-            row = conn.execute("SELECT lines, screenshot_path FROM translations WHERE id=?", (db_id,)).fetchone()
-            conn.close()
+            row = self._db_conn.execute(
+                "SELECT lines, screenshot_path FROM translations WHERE id=?", (db_id,)
+            ).fetchone()
             if not row:
                 return
-            raw_lines, ss_rel = row
+            raw_lines, ss_rel = row[0], row[1]
 
-            # 解析 segments，相容新格式 list[dict] / 舊格式 list[str]
             parsed = json.loads(raw_lines)
             segments = []
             for i, item in enumerate(parsed):
                 if isinstance(item, str):
-                    # 舊格式：補預設座標
                     segments.append({"tw": item, "x": 0.05, "y": round(i * 0.09 + 0.05, 4), "w": 0.9, "h": 0.08})
                 else:
                     segments.append(item)
 
             self._t4_current_segments = segments
             self._t4_current_img_path = os.path.join(self.LOG_DIR, ss_rel) if ss_rel else None
-
-            # 渲染截圖
             self._t4_render()
         except Exception as e:
             log(f"[Tab4] 載入詳細失敗: {e}")
 
     def _t4_toggle_overlay(self):
-        """切換疊圖/純圖模式並立即重新渲染"""
         self.t4_overlay_var.set(not self.t4_overlay_var.get())
         if self.t4_overlay_var.get():
             self.t4_toggle_btn.config(text=S("btn_overlay"))
@@ -4248,68 +4322,66 @@ class LangForgeApp:
         self._t4_render()
 
     def _t4_render(self):
-        """渲染截圖到 Tab4 圖片區（自適應頁籤寬度，疊圖或純圖）"""
         if not self._t4_current_img_path:
             return
         try:
-            img = Image.open(self._t4_current_img_path).convert("RGB")
+            # 動態取得可用寬高
+            self.t4_img_label.update_idletasks()
+            avail_w = self.t4_img_label.winfo_width()
+            if avail_w < 100:
+                avail_w = self.root.winfo_width() - 32
+            MAX_W = max(avail_w, 200)
+            label_y = self.t4_img_label.winfo_rooty() - self.root.winfo_rooty()
+            avail_h = max(self.root.winfo_height() - label_y - 10, 150)
+
+            # ── 縮放圖片快取：相同路徑+尺寸直接複用，避免重複 open+resize ──
+            cache_key = (self._t4_current_img_path, MAX_W, avail_h)
+            cached = getattr(self, "_t4_render_cache", None)
+            if cached and cached[0] == cache_key:
+                img, out_w, out_h, orig_w, orig_h = cached[1]
+            else:
+                img = Image.open(self._t4_current_img_path).convert("RGB")
+                orig_w, orig_h = img.width, img.height
+                scale = min(MAX_W / orig_w, avail_h / orig_h, 1.0)
+                out_w = int(orig_w * scale)
+                out_h = int(orig_h * scale)
+                img = img.resize((out_w, out_h), Image.LANCZOS)
+                self._t4_render_cache = (cache_key, (img, out_w, out_h, orig_w, orig_h))
+
+            if self.t4_overlay_var.get() and self._t4_current_segments:
+                # ── 疊圖：原圖 30% + 黑底 + 白字 ──
+                bg_rgba = img.convert("RGBA")
+                black_bg = Image.new("RGBA", (out_w, out_h), (0, 0, 0, 255))
+                blended = Image.blend(black_bg, bg_rgba, alpha=0.30)
+                out_img = blended.convert("RGB")
+                draw = ImageDraw.Draw(out_img)
+
+                tgt_lang_str = self.tgt_lang_var.get() if hasattr(self, "tgt_lang_var") else "Traditional Chinese(正體中文)"
+                font = _get_font_for_lang(tgt_lang_str, 16)
+
+                for s in self._t4_current_segments:
+                    tw = s.get("tw", "").replace("\n", " ").replace("\r", "").strip()
+                    if not tw:
+                        continue
+                    sx = float(s.get("x", 0.05))
+                    sy = float(s.get("y", 0.1))
+                    if sx > 1.0:
+                        sx = sx / orig_w
+                    if sy > 1.0:
+                        sy = sy / orig_h
+                    dx = max(PADDING, int(sx * out_w))
+                    dy = max(PADDING, int(sy * out_h))
+                    draw_wrapped_text_safe(draw, tw, dx + 1, dy + 1, font, out_w, out_h, (0, 0, 0))
+                    draw_wrapped_text_safe(draw, tw, dx, dy, font, out_w, out_h, "white")
+            else:
+                out_img = img
+
+            self._t4_tk_img = ImageTk.PhotoImage(out_img)
+            self.t4_img_label.config(image=self._t4_tk_img, width=out_w, height=out_h)
         except Exception as e:
             log(f"[Tab4] 開啟截圖失敗: {e}")
-            return
-
-        # 動態取得可用寬高
-        self.t4_img_label.update_idletasks()
-        avail_w = self.t4_img_label.winfo_width()
-        if avail_w < 100:
-            avail_w = self.root.winfo_width() - 32
-        MAX_W = max(avail_w, 200)
-
-        # 高度：從 img_label 頂部到主視窗底部的剩餘空間，最小 150
-        label_y = self.t4_img_label.winfo_rooty() - self.root.winfo_rooty()
-        avail_h = max(self.root.winfo_height() - label_y - 10, 150)
-
-        # 縮放維持比例，同時限制寬度與高度
-        orig_w, orig_h = img.width, img.height
-        scale = min(MAX_W / orig_w, avail_h / orig_h, 1.0)
-        out_w = int(orig_w * scale)
-        out_h = int(orig_h * scale)
-        img = img.resize((out_w, out_h), Image.LANCZOS)
-
-        if self.t4_overlay_var.get() and self._t4_current_segments:
-            # ── 疊圖：原圖 30% + 黑底 + 白字（與 render() 邏輯一致） ──
-            bg_rgba = img.convert("RGBA")
-            black_bg = Image.new("RGBA", (out_w, out_h), (0, 0, 0, 255))
-            blended = Image.blend(black_bg, bg_rgba, alpha=0.30)
-            out_img = blended.convert("RGB")
-            draw = ImageDraw.Draw(out_img)
-
-            tgt_lang_str = self.tgt_lang_var.get() if hasattr(self, "tgt_lang_var") else "Traditional Chinese(正體中文)"
-            font = _get_font_for_lang(tgt_lang_str, 16)
-
-            for s in self._t4_current_segments:
-                tw = s.get("tw", "").replace("\n", " ").replace("\r", "").strip()
-                if not tw:
-                    continue
-                sx = float(s.get("x", 0.05))
-                sy = float(s.get("y", 0.1))
-                # 相容像素值
-                if sx > 1.0:
-                    sx = sx / orig_w
-                if sy > 1.0:
-                    sy = sy / orig_h
-                dx = max(PADDING, int(sx * out_w))
-                dy = max(PADDING, int(sy * out_h))
-                draw_wrapped_text_safe(draw, tw, dx + 1, dy + 1, font, out_w, out_h, (0, 0, 0))
-                draw_wrapped_text_safe(draw, tw, dx, dy, font, out_w, out_h, "white")
-        else:
-            out_img = img
-
-        self._t4_tk_img = ImageTk.PhotoImage(out_img)
-        self.t4_img_label.config(image=self._t4_tk_img, width=out_w, height=out_h)
 
     def _t4_delete(self):
-        """刪除目前選取的翻譯紀錄並刷新清單"""
-        import sqlite3
 
         if self._t4_current_db_id is None:
             return
@@ -4334,13 +4406,8 @@ class LangForgeApp:
     # ══════════════════════════════════════════
 
     def _t5_refresh_games(self):
-        """從 DB 撈不重複 rom_name 更新篩選下拉"""
-        import sqlite3
-
         try:
-            conn = sqlite3.connect(self.DB_PATH)
-            rows = conn.execute("SELECT DISTINCT rom_name FROM guides ORDER BY rom_name").fetchall()
-            conn.close()
+            rows = self._db_conn.execute("SELECT DISTINCT rom_name FROM guides ORDER BY rom_name").fetchall()
             names = [S("all_games")] + [r[0] for r in rows]
             self.t5_game_combo["values"] = names
             if self.t5_game_var.get() not in names:
@@ -4349,63 +4416,68 @@ class LangForgeApp:
             log(f"[Tab5] 刷新遊戲清單失敗: {e}")
 
     def _t5_load_list(self):
-        """依篩選遊戲載入攻略清單到 Treeview"""
-        import sqlite3
-
+        T5_PAGE_SIZE = 500
         try:
             game = self.t5_game_var.get()
-            conn = sqlite3.connect(self.DB_PATH)
             if game == S("all_games"):
-                rows = conn.execute(
-                    "SELECT id, timestamp, model, progress, rom_name FROM guides " "ORDER BY id DESC"
+                rows = self._db_conn.execute(
+                    f"SELECT id, timestamp, model, progress, rom_name FROM guides ORDER BY id DESC LIMIT {T5_PAGE_SIZE}"
                 ).fetchall()
             else:
-                rows = conn.execute(
-                    "SELECT id, timestamp, model, progress, rom_name FROM guides " "WHERE rom_name=? ORDER BY id DESC",
+                rows = self._db_conn.execute(
+                    f"SELECT id, timestamp, model, progress, rom_name FROM guides WHERE rom_name=? ORDER BY id DESC LIMIT {T5_PAGE_SIZE}",
                     (game,),
                 ).fetchall()
-            conn.close()
-            for item in self.t5_tree.get_children():
-                self.t5_tree.delete(item)
-            for row in rows:
-                progress_short = (row[3] or "")[:20]
-                self.t5_tree.insert("", "end", iid=str(row[0]), values=(row[4] or "", row[1], progress_short))
+
+            new_ids = {str(row[0]) for row in rows}
+            existing_ids = set(self.t5_tree.get_children())
+            for iid in existing_ids - new_ids:
+                self.t5_tree.delete(iid)
+            for row in reversed(rows):
+                iid = str(row[0])
+                if iid not in existing_ids:
+                    progress_short = (row[3] or "")[:20]
+                    self.t5_tree.insert("", 0, iid=iid, values=(row[4] or "", row[1], progress_short))
         except Exception as e:
             log(f"[Tab5] 載入清單失敗: {e}")
 
     def _t5_on_select(self, event):
-        """Treeview 點選：載入進度與攻略建議，並顯示縮圖"""
         sel = self.t5_tree.selection()
         if not sel:
             return
         db_id = int(sel[0])
         self._t5_current_db_id = db_id
-        import sqlite3
 
         try:
-            conn = sqlite3.connect(self.DB_PATH)
-            row = conn.execute(
+            row = self._db_conn.execute(
                 "SELECT progress, guide_content, screenshot_path FROM guides WHERE id=?", (db_id,)
             ).fetchone()
-            conn.close()
             if not row:
                 return
-            progress, guide_json, ss_rel = row
+            progress, guide_json, ss_rel = row[0], row[1], row[2]
             try:
                 guide_list = json.loads(guide_json) if guide_json else []
             except Exception:
                 guide_list = []
 
-            # 縮圖顯示
+            # ── 縮圖快取：相同路徑直接複用 ──
             if ss_rel:
                 ss_path = os.path.join(self.LOG_DIR, ss_rel)
-                try:
-                    img = Image.open(ss_path).convert("RGB")
-                    img.thumbnail((128, 128), Image.LANCZOS)
-                    self._t5_guide_tk_img = ImageTk.PhotoImage(img)
+                cached_thumb = getattr(self, "_t5_thumb_cache", None)
+                if cached_thumb and cached_thumb[0] == ss_path:
+                    self._t5_guide_tk_img = cached_thumb[1]
+                else:
+                    try:
+                        img = Image.open(ss_path).convert("RGB")
+                        img.thumbnail((128, 128), Image.LANCZOS)
+                        self._t5_guide_tk_img = ImageTk.PhotoImage(img)
+                        self._t5_thumb_cache = (ss_path, self._t5_guide_tk_img)
+                    except Exception:
+                        self._t5_guide_tk_img = None
+                        self._t5_thumb_cache = None
+                if self._t5_guide_tk_img:
                     self.t5_guide_img_label.config(image=self._t5_guide_tk_img, text="")
-                except Exception:
-                    self._t5_guide_tk_img = None
+                else:
                     self.t5_guide_img_label.config(image="", text="(no img)")
             else:
                 self._t5_guide_tk_img = None
@@ -4414,7 +4486,7 @@ class LangForgeApp:
             # 進度標籤
             self.t5_progress_label.config(text=progress or "")
 
-            # 攻略建議（圓圈數字編號，條目間空一行）
+            # 攻略建議
             CIRCLE_NUMS = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
             self.t5_guide_text.config(state="normal")
             self.t5_guide_text.delete("1.0", "end")
@@ -4426,8 +4498,6 @@ class LangForgeApp:
             log(f"[Tab5] 載入詳細攻略失敗: {e}")
 
     def _t5_delete(self):
-        """刪除目前選取的攻略紀錄並刷新清單"""
-        import sqlite3
 
         if self._t5_current_db_id is None:
             return
@@ -4438,6 +4508,7 @@ class LangForgeApp:
             conn.close()
             log(f"[Tab5] 已刪除攻略紀錄 id={self._t5_current_db_id}")
             self._t5_current_db_id = None
+            self._t5_thumb_cache = None
             self.t5_progress_label.config(text="")
             self._t5_guide_tk_img = None
             self.t5_guide_img_label.config(image="", text="")
@@ -4454,7 +4525,6 @@ class LangForgeApp:
     # ══════════════════════════════════════════
 
     def _debounce_save_config(self):
-        """trace_add debounce：最後一次輸入完成 800ms 後才寫磁碟。"""
         if self._save_config_after_id:
             self.root.after_cancel(self._save_config_after_id)
         self._save_config_after_id = self.root.after(800, self._flush_config)
@@ -4465,7 +4535,6 @@ class LangForgeApp:
         self._on_use_ollama_toggle()
 
     def _save_auto_trans_config(self):
-        """將差異門檻與穩定次數即時儲存至 config"""
         try:
             self.config["stable_diff"] = int(self.stable_diff_var.get())
         except (ValueError, AttributeError):
@@ -4505,7 +4574,6 @@ class LangForgeApp:
         self._update_indicators()
 
     def _sync_auto_cap_btn(self):
-        """依 auto_trans 狀態更新 Tab1 自動擷取按鈕"""
         if not hasattr(self, "auto_cap_btn"):
             return
         enabled = self.auto_trans_var.get()
@@ -4514,7 +4582,6 @@ class LangForgeApp:
         )
 
     def _on_auto_cap_btn(self):
-        """Tab1 停止自動擷取按鈕：與 Tab2 Checkbutton 效果相同"""
         self.auto_trans_var.set(False)
         self._on_auto_trans_toggle()
 
@@ -4537,21 +4604,37 @@ class LangForgeApp:
         return ImageGrab.grab(bbox=(px1, py1, px2, py2), all_screens=True).convert("RGB")
 
     def _try_capture(self):
-        """重用 _window_capture_task 的擷取邏輯，回傳 PIL Image 或 None"""
         try:
             target = self.title_var.get().lower().strip()
             if not target:
                 return None
+
+            # ── hwnd 快取：先驗證上次找到的 hwnd 是否仍有效 ──
+            cached_hwnd = getattr(self, "_try_capture_hwnd", None)
+            cached_target = getattr(self, "_try_capture_target", None)
             hwnd = None
 
-            def _handler(h, _):
-                nonlocal hwnd
-                if target in win32gui.GetWindowText(h).lower():
-                    hwnd = h
-                    return False
-                return True
+            if cached_hwnd and cached_target == target:
+                try:
+                    if win32gui.IsWindow(cached_hwnd) and win32gui.IsWindowVisible(cached_hwnd):
+                        title = win32gui.GetWindowText(cached_hwnd).lower()
+                        if target in title:
+                            hwnd = cached_hwnd
+                except Exception:
+                    pass
 
-            win32gui.EnumWindows(_handler, None)
+            if not hwnd:
+                # 快取失效，重新 EnumWindows 掃描
+                def _handler(h, _):
+                    nonlocal hwnd
+                    if target in win32gui.GetWindowText(h).lower():
+                        hwnd = h
+                        return False
+                    return True
+                win32gui.EnumWindows(_handler, None)
+                self._try_capture_hwnd = hwnd
+                self._try_capture_target = target
+
             if not hwnd:
                 return None
             try:
@@ -4562,10 +4645,10 @@ class LangForgeApp:
                 crop_top = 0
             return self._grab_window_hwnd(hwnd, crop_top)
         except Exception:
+            self._try_capture_hwnd = None  # 出錯時清除快取
             return None
 
     def _refresh_model_list(self):
-        """重新載入目前引擎的內建模型清單到 model_combo（保留自訂模型）。"""
         eng = self.engine_var.get()
         built_in = list(ENGINE_MODELS.get(eng, []))
         custom = self.config.get("custom_models", {}).get(eng, [])
@@ -4577,14 +4660,11 @@ class LangForgeApp:
             self.model_var.set(default)
         self._refresh_quota()
         self._set_status(
-            f"已更新 {ENGINE_DISPLAY.get(eng, eng)} 模型清單（{len(all_models)} 個）"
-            if CURRENT_LANG != "en"
-            else f"Updated {ENGINE_DISPLAY.get(eng, eng)} model list ({len(all_models)} models)",
+            S("status_model_list_updated").format(engine=ENGINE_DISPLAY.get(eng, eng), n=len(all_models)),
             "green"
         )
 
     def _clear_queue(self):
-        """清空請求佇列（正在執行中的那筆不受影響）。"""
         cleared = 0
         while not _request_queue.empty():
             try:
@@ -4596,12 +4676,25 @@ class LangForgeApp:
         self._update_queue_label(0)
         if cleared > 0:
             log(f"已清空佇列，移除 {cleared} 筆待處理任務")
-            self._set_status(f"已清空佇列（{cleared} 筆）" if CURRENT_LANG != "en" else f"Queue cleared ({cleared} tasks)", "orange")
+            self._set_status(S("status_queue_cleared").format(n=cleared), "orange")
         else:
-            self._set_status("佇列已是空的" if CURRENT_LANG != "en" else "Queue is already empty", "gray")
+            self._set_status(S("status_queue_empty"), "gray")
 
     def _enqueue_task(self, task: dict) -> bool:
-        """將任務放入佇列，佇列滿時回傳 False 並顯示提示。"""
+        """將任務放入佇列，佇列滿時回傳 False 並顯示提示。
+        在主執行緒呼叫，順帶快照所有 UI 狀態供 worker thread 安全存取。
+        """
+        # ── 快照 UI 狀態（主執行緒讀取，worker thread 直接用快照值）──
+        task.setdefault("snap_src_lang",     self.src_lang_var.get())
+        task.setdefault("snap_tgt_lang",     self.tgt_lang_var.get())
+        task.setdefault("snap_engine_mode",  self.engine_mode_var.get())
+        task.setdefault("snap_engine",       self.engine_var.get())
+        task.setdefault("snap_model",        self.model_var.get())
+        task.setdefault("snap_api_key",      self.api_entry.get().strip())
+        task.setdefault("snap_ollama_model", self.ollama_model_var.get() if hasattr(self, "ollama_model_var") else "")
+        task.setdefault("snap_ollama_timeout", self.ollama_timeout_var.get() if hasattr(self, "ollama_timeout_var") else str(OLLAMA_TIMEOUT))
+        task.setdefault("snap_target_window", self.title_var.get().strip())
+        task.setdefault("snap_platform",     self.platform_var.get().strip())
         try:
             _request_queue.put_nowait(task)
             qsize = _request_queue.qsize()
@@ -4616,7 +4709,6 @@ class LangForgeApp:
             return False
 
     def _request_worker(self):
-        """常駐 worker thread：依序從佇列取出任務執行。"""
         while True:
             task = _request_queue.get()
             if task is None:
@@ -4624,12 +4716,17 @@ class LangForgeApp:
                 break
             try:
                 t = task["type"]
+                img   = task["image_pil"]
+                src   = task.get("source", "file")
+                title = task.get("win_title", "")
+                # 把 snap_* 快照單獨傳入，避免與位置參數衝突
+                snaps = {k: v for k, v in task.items() if k.startswith("snap_")}
                 if t == "translate":
-                    self._do_translate(task["image_pil"], task["source"], task["win_title"])
+                    self._do_translate(img, src, title, **snaps)
                 elif t == "guide":
-                    self._do_guide(task["image_pil"], task["win_title"])
+                    self._do_guide(img, title, **snaps)
                 elif t == "combined":
-                    self._do_combined_translate(task["image_pil"], task["win_title"])
+                    self._do_combined_translate(img, title, **snaps)
             except Exception as e:
                 log(f"[Worker] 執行失敗: {e}")
             finally:
@@ -4637,7 +4734,6 @@ class LangForgeApp:
                 self.root.after(0, lambda: self._update_queue_label(_request_queue.qsize()))
 
     def _trigger_auto_translate(self, image_pil):
-        """用已擷取的截圖觸發翻譯；若冷卻中、佇列有任務或配額不足則跳過"""
         mode = self.engine_mode_var.get()
         # 本地/OCR 模式不需要冷卻判斷
         if mode not in ("local", "ocr"):
@@ -4673,17 +4769,13 @@ class LangForgeApp:
         image_pil = self._try_capture()
 
         if image_pil is not None:
-            import hashlib
-            from PIL import ImageChops
-
+            import numpy as np
             gray = image_pil.convert("L")
 
             if self._stable_prev_img is not None:
-                # 尺寸不符時跳過差異比較（視窗大小變化）
                 if gray.size == self._stable_prev_img.size:
                     diff = ImageChops.difference(gray, self._stable_prev_img)
-                    pixels = list(getattr(diff, "get_flattened_data", diff.getdata)())
-                    avg_diff = sum(pixels) / len(pixels) if pixels else 999
+                    avg_diff = np.mean(np.array(diff))
 
                     if avg_diff < diff_threshold:
                         self._stable_count += 1
@@ -4753,6 +4845,13 @@ class LangForgeApp:
                 self._auto_trans_job = None
         except Exception:
             pass
+        # 取消視窗位置 polling
+        try:
+            if getattr(self, "_position_poll_job", None):
+                self.root.after_cancel(self._position_poll_job)
+                self._position_poll_job = None
+        except Exception:
+            pass
         try:
             if HAS_KEYBOARD:
                 if getattr(self, "_hotkey_handle", None) is not None:
@@ -4774,13 +4873,17 @@ class LangForgeApp:
                     self.guide_display.destroy()
             except:
                 pass
+            try:
+                if hasattr(self, "_db_conn") and self._db_conn:
+                    self._db_conn.close()
+            except Exception:
+                pass
             self.root.destroy()
 
     # ══════════════════════════════════════════
     # 狀態列更新
     # ══════════════════════════════════════════
     def _safe_save_config(self):
-        """Thread-safe save_config：若在 worker thread 中呼叫，轉回主執行緒執行。"""
         if threading.current_thread() is threading.main_thread():
             save_config(self.config)
         else:
@@ -4788,9 +4891,8 @@ class LangForgeApp:
 
     def _set_status(self, text, color="blue"):
         # 簡化：移除訊息中的模型名稱前綴（格式：「引擎 (模型) 訊息」→「訊息」）
-        import re as _re
 
-        simplified = _re.sub(r"^[A-Za-z]+\s*\([^)]+\)\s*", "", text).strip()
+        simplified = re.sub(r"^[A-Za-z]+\s*\([^)]+\)\s*", "", text).strip()
         if not simplified:
             simplified = text
 
@@ -4814,7 +4916,6 @@ class LangForgeApp:
         self.root.after(0, _update)
 
     def _start_elapsed_timer(self):
-        """啟動每秒遞增計時器，清空舊 timer。"""
         if getattr(self, "_elapsed_timer_id", None):
             self.root.after_cancel(self._elapsed_timer_id)
             self._elapsed_timer_id = None
@@ -4826,7 +4927,6 @@ class LangForgeApp:
         self._elapsed_tick()
 
     def _elapsed_tick(self):
-        """每秒更新一次計時顯示，直到 _trans_start_time 被清除。"""
         if not getattr(self, "_trans_start_time", None):
             return
         if not (hasattr(self, "elapsed_label") and self.elapsed_label.winfo_exists()):
@@ -4836,7 +4936,6 @@ class LangForgeApp:
         self._elapsed_timer_id = self.root.after(1000, self._elapsed_tick)
 
     def _stamp_elapsed(self):
-        """停止計時並凍結顯示最終秒數。"""
         if not getattr(self, "_trans_start_time", None):
             return
         if getattr(self, "_elapsed_timer_id", None):
@@ -4891,7 +4990,6 @@ class LangForgeApp:
         self._refresh_quota()
 
     def _set_default_engine(self):
-        """將目前選用的引擎＋模型寫入 config 作為下次啟動預設"""
         eng = self.engine_var.get()
         model = self.model_var.get()
         self.config["default_engine"] = eng
@@ -4903,11 +5001,14 @@ class LangForgeApp:
     def _save_current_key_to_config(self):
         for eng in ENGINE_ORDER:
             if self.key_label.cget("text") == f"{ENGINE_DISPLAY[eng]} API Key:":
-                self.config[eng] = self.api_entry.get()
+                new_key = self.api_entry.get()
+                old_key = self.config.get(eng, "")
+                if new_key != old_key:
+                    _invalidate_client(eng, old_key)  # Key 變更，清除舊 client 快取
+                self.config[eng] = new_key
                 break
 
     def _refresh_model_list(self):
-        """重新套用當前引擎的內建模型清單（含自訂模型）至 model_combo。"""
         eng = self.engine_var.get()
         built_in = list(ENGINE_MODELS.get(eng, []))
         custom_list = self.config.get("custom_models", {}).get(eng, [])
@@ -4918,12 +5019,11 @@ class LangForgeApp:
             self.model_var.set(ENGINE_DEFAULT_MODEL.get(eng, all_models[0] if all_models else ""))
         self._refresh_quota()
         self._set_status(
-            f"{'模型清單已更新' if CURRENT_LANG != 'en' else 'Model list refreshed'}: {ENGINE_DISPLAY.get(eng, eng)}",
+            S("status_model_list_updated").format(engine=ENGINE_DISPLAY.get(eng, eng), n=len(all_models)),
             "green"
         )
 
     def _add_custom_model(self):
-        """新增自訂模型到當前引擎"""
         model_name = self.custom_model_var.get().strip()
         if not model_name:
             return
@@ -4946,7 +5046,6 @@ class LangForgeApp:
         self._set_status(S("status_model_added").format(model=model_name), "green")
 
     def _remove_custom_model(self):
-        """移除目前選擇的自訂模型（僅限自訂清單內的可移除）"""
         model_name = self.model_var.get()
         eng = self.engine_var.get()
         custom_key = f"custom_models_{eng}"
@@ -4968,7 +5067,6 @@ class LangForgeApp:
             self._set_status(S("status_no_model_remove"), "orange")
 
     def _get_engine_models(self, eng):
-        """取得引擎的完整模型清單（內建 + 自訂）"""
         built_in = list(ENGINE_MODELS.get(eng, []))
         custom = list(self.config.get(f"custom_models_{eng}", []))
         return built_in + custom
@@ -5039,7 +5137,6 @@ class LangForgeApp:
             log(f"快捷鍵停用失敗: {e}")
 
     def _hotkey_triggered(self):
-        """快捷鍵觸發時，在主線程執行擷取翻譯"""
         self.root.after(0, self.start_worker)
 
     # ══════════════════════════════════════════
@@ -5119,15 +5216,12 @@ class LangForgeApp:
         return result[0]
 
     def _on_display_close(self):
-        """使用者關閉翻譯視窗：隱藏，下次翻譯完成後自動重新顯示"""
         self.display.withdraw()
 
     def _on_guide_display_close(self):
-        """使用者關閉攻略視窗：隱藏，下次攻略完成後自動重新顯示"""
         self.guide_display.withdraw()
 
     def _ensure_display(self):
-        """確保翻譯視窗存在且可見；被關閉(destroy)時重建，被隱藏時 deiconify。"""
         if not hasattr(self, "display") or not self.display.winfo_exists():
             # 視窗已被 destroy（on_close 流程），不重建
             return
@@ -5135,13 +5229,11 @@ class LangForgeApp:
         self.display.lift()
 
     def _ensure_guide_display(self):
-        """確保攻略視窗存在且可見；被關閉(destroy)時重建，被隱藏時 deiconify。"""
         if not hasattr(self, "guide_display") or not self.guide_display.winfo_exists():
             return
         self.guide_display.deiconify()
 
     def _on_main_move(self, event=None):
-        """<Configure> 事件 debounce：100ms 內重複觸發只執行最後一次。"""
         if self._reposition_after_id:
             self.root.after_cancel(self._reposition_after_id)
         self._reposition_after_id = self.root.after(100, self._reposition_debounced)
@@ -5151,19 +5243,16 @@ class LangForgeApp:
         self._reposition_windows()
 
     def _set_display_geom(self, geom: str):
-        """設定翻譯視窗位置，位置未改變時略過 geometry() 呼叫。"""
         if geom != self._last_disp_geom:
             self.display.geometry(geom)
             self._last_disp_geom = geom
 
     def _set_guide_geom(self, geom: str):
-        """設定攻略視窗位置，位置未改變時略過 geometry() 呼叫。"""
         if geom != self._last_guide_geom:
             self.guide_display.geometry(geom)
             self._last_guide_geom = geom
 
     def _reposition_windows(self):
-        """根據視窗模式重新定位翻譯與攻略視窗（只改位置不改大小）"""
         try:
             if not self.display.winfo_exists():
                 return
@@ -5241,7 +5330,6 @@ class LangForgeApp:
             pass
 
     def _on_screen_change(self, event=None):
-        """螢幕選擇變更：移動主視窗至選定螢幕並儲存設定"""
         label = self.screen_var.get()
         mon = next((m for m in self._monitors if m["label"] == label), None)
         if mon is None:
@@ -5252,7 +5340,6 @@ class LangForgeApp:
         self.root.after(100, self._reposition_windows)
 
     def _on_winmode_change(self):
-        """視窗模式切換時立即生效並儲存"""
         self.config["winmode"] = self.winmode_var.get()
         save_config(self.config)
         self._reposition_windows()
@@ -5262,7 +5349,7 @@ class LangForgeApp:
         self.config["combo_guide"] = self.combo_guide_var.get()
         save_config(self.config)
         self._update_combo_guide_status()
-        state = "開啟" if self.combo_guide_var.get() else "關閉"
+        state = S("lbl_guide_toggle_on") if self.combo_guide_var.get() else S("lbl_guide_toggle_off")
         log(f"截取翻譯同時攻略: {state}")
 
     def _update_combo_guide_status(self):
@@ -5273,7 +5360,6 @@ class LangForgeApp:
         self._update_indicators()
 
     def _refresh_ollama_models(self):
-        """重新偵測 OLLAMA 已安裝模型並更新下拉清單。"""
         new_models = _detect_ollama_vision_models()
         self._ollama_models = new_models
         self._ollama_available = len(new_models) > 0
@@ -5293,7 +5379,6 @@ class LangForgeApp:
         log(f"[OLLAMA] 重新偵測完成，找到 {count} 個模型")
 
     def _on_use_ollama_toggle(self, event=None):
-        """OLLAMA 開關或模型選擇變更時儲存設定"""
         self.config["use_ollama"] = self.use_ollama_var.get()
         self.config["ollama_model"] = self.ollama_model_var.get()
         try:
@@ -5305,7 +5390,6 @@ class LangForgeApp:
         save_config(self.config)
 
     def _on_vision_filter_toggle(self):
-        """視覺引擎過濾開關切換：更新模型下拉清單"""
         if not self._ollama_available or self.ollama_combo is None:
             return
         filtered = self.vision_filter_var.get()
@@ -5319,7 +5403,6 @@ class LangForgeApp:
         save_config(self.config)
 
     def _update_queue_label(self, qsize: int = 0):
-        """更新第二列欄1的佇列狀態顯示。"""
         if not hasattr(self, "queue_label") or not self.queue_label.winfo_exists():
             return
         if qsize <= 0:
@@ -5330,7 +5413,6 @@ class LangForgeApp:
             self.queue_label.config(text=f'{S("lbl_queue")} {qsize}/{REQUEST_QUEUE_MAXSIZE}', foreground="steelblue")
 
     def _on_engine_mode_change(self):
-        """引擎模式切換（雲端/本地OLLAMA/OCR）"""
         mode = self.engine_mode_var.get()
         self.config["engine_mode"] = mode
         self.use_ollama_var.set(mode == "local")
@@ -5339,7 +5421,6 @@ class LangForgeApp:
         self._apply_engine_mode(animate=True)
 
     def _apply_engine_mode(self, animate: bool = True):
-        """依 engine_mode_var 切換引擎區塊（pack 切換）。"""
         mode = self.engine_mode_var.get()
         ocr_frame = getattr(self, "ocr_frame", None)
 
@@ -5357,7 +5438,6 @@ class LangForgeApp:
                 ocr_frame.pack(fill="x")
 
     def _update_indicators(self):
-        """更新 Tab1 欄3 四個開關指示燈（開=黑色，關=灰色）"""
         if not hasattr(self, "_ind_auto"):
             return
         _ON = "#111111"
@@ -5378,7 +5458,6 @@ class LangForgeApp:
         self._ind_guide_hotkey.config(fg=_ON if ghk_on else _OFF)
 
     def _start_pick_window(self):
-        """開始倒數 5 秒，時間到抓取前景視窗標題。"""
         if getattr(self, "_pick_countdown_id", None):
             self.root.after_cancel(self._pick_countdown_id)
         self.pick_window_btn.config(state="disabled")
@@ -5386,7 +5465,6 @@ class LangForgeApp:
         self._pick_window_tick(5)
 
     def _cancel_pick_window(self):
-        """取消倒數，恢復初始狀態。"""
         if getattr(self, "_pick_countdown_id", None):
             self.root.after_cancel(self._pick_countdown_id)
             self._pick_countdown_id = None
@@ -5396,7 +5474,6 @@ class LangForgeApp:
         log("[PickWindow] 已取消")
 
     def _pick_window_tick(self, remaining: int):
-        """每秒更新倒數提示，歸零時抓取前景視窗。"""
         if remaining > 0:
             self.pick_hint_label.config(text=S("lbl_pick_hint") + f" ({remaining})", foreground="orange")
             self._pick_countdown_id = self.root.after(1000, self._pick_window_tick, remaining - 1)
@@ -5428,8 +5505,8 @@ class LangForgeApp:
             self._pick_countdown_id = None
 
     def _add_target_window(self):
-        """新增目標視窗到清單"""
         self._mesen_cache_ts = 0.0  # 清快取，強制下次重新偵測
+        self._try_capture_hwnd = None  # 清除 hwnd 快取
         name = self.title_var.get().strip()
         # 忽略提示文字
         if not name or name == S("hint_no_target"):
@@ -5447,8 +5524,8 @@ class LangForgeApp:
         self._set_status(S("status_win_added").format(name=name), "green")
 
     def _remove_target_window(self):
-        """移除目前選擇的目標視窗"""
         self._mesen_cache_ts = 0.0  # 清快取
+        self._try_capture_hwnd = None  # 清除 hwnd 快取
         name = self.title_var.get().strip()
         targets = list(self.config.get("target_windows", []))
         if name not in targets:
@@ -5473,7 +5550,7 @@ class LangForgeApp:
         """
         if not self._position_polling_paused:
             self._reposition_windows()
-        self.root.after(500, self._start_position_polling)
+        self._position_poll_job = self.root.after(500, self._start_position_polling)
 
     # ══════════════════════════════════════════
 
@@ -5481,17 +5558,20 @@ class LangForgeApp:
     # 選擇圖片檔案翻譯
     # ══════════════════════════════════════════
     def pick_image_file(self):
+        if self._capture_in_progress:
+            return
         filepath = filedialog.askopenfilename(
-            title="選擇圖片檔案",
+            title=S("dlg_file_title"),
             filetypes=[
-                ("圖片檔案", "*.png *.jpg *.jpeg *.bmp *.gif *.webp"),
-                ("所有檔案", "*.*"),
+                (S("dlg_file_types_img"), "*.png *.jpg *.jpeg *.bmp *.gif *.webp"),
+                (S("dlg_file_types_all"), "*.*"),
             ],
         )
         if not filepath:
             return
         if self.engine_mode_var.get() not in ("local", "ocr") and not self._check_cooldown_and_quota():
             return
+        self._capture_in_progress = True
         self._start_elapsed_timer()
         self._set_status(S("status_img_loading"), "orange")
         threading.Thread(target=self._file_translate_task, args=(filepath,), daemon=True).start()
@@ -5502,57 +5582,65 @@ class LangForgeApp:
         except Exception as e:
             log(f"圖片讀取失敗: {e}")
             self._set_status(S("status_img_load_fail"), "red")
+            self._capture_in_progress = False
             return
         self._enqueue_task({"type": "translate", "image_pil": img, "win_title": "", "source": "file"})
+        self._capture_in_progress = False
 
     # ══════════════════════════════════════════
     # 視窗擷取翻譯
     # ══════════════════════════════════════════
     def start_worker(self):
+        if self._capture_in_progress:
+            return
         if self.engine_mode_var.get() not in ("local", "ocr") and not self._check_cooldown_and_quota():
             return
+        self._capture_in_progress = True
         self._start_elapsed_timer()
         self._set_status(S("status_capturing"), "orange")
         threading.Thread(target=self._window_capture_task, daemon=True).start()
 
     def _window_capture_task(self):
-        target = self.title_var.get().lower().strip()
-        if not target:
-            self._set_status(S("status_no_target_win"), "red")
-            self._stamp_elapsed()
-            return
-        hwnd = None
-
-        def _handler(h, _):
-            nonlocal hwnd
-            if target in win32gui.GetWindowText(h).lower():
-                hwnd = h
-                return False
-            return True
-
-        win32gui.EnumWindows(_handler, None)
-        if not hwnd:
-            self._set_status(S("status_win_missing"), "red")
-            return
-
         try:
-            crop_top = int(self.crop_top_var.get())
-        except ValueError:
-            crop_top = 0
-        if crop_top < 0:
-            crop_top = 0
+            target = self.title_var.get().lower().strip()
+            if not target:
+                self._set_status(S("status_no_target_win"), "red")
+                self._stamp_elapsed()
+                return
+            hwnd = None
 
-        # 儲存設定
-        if self.config.get("crop_top") != crop_top:
-            self.config["crop_top"] = crop_top
-            save_config(self.config)
+            def _handler(h, _):
+                nonlocal hwnd
+                if target in win32gui.GetWindowText(h).lower():
+                    hwnd = h
+                    return False
+                return True
 
-        img = self._grab_window_hwnd(hwnd, crop_top)
-        win_title = win32gui.GetWindowText(hwnd)
-        if self.combo_guide_var.get():
-            self._enqueue_task({"type": "combined", "image_pil": img, "win_title": win_title, "source": "capture"})
-        else:
-            self._enqueue_task({"type": "translate", "image_pil": img, "win_title": win_title, "source": "capture"})
+            win32gui.EnumWindows(_handler, None)
+            if not hwnd:
+                self._set_status(S("status_win_missing"), "red")
+                return
+
+            try:
+                crop_top = int(self.crop_top_var.get())
+            except ValueError:
+                crop_top = 0
+            if crop_top < 0:
+                crop_top = 0
+
+            # 儲存設定
+            if self.config.get("crop_top") != crop_top:
+                self.config["crop_top"] = crop_top
+                save_config(self.config)
+
+            img = self._grab_window_hwnd(hwnd, crop_top)
+            win_title = win32gui.GetWindowText(hwnd)
+            if self.combo_guide_var.get():
+                self._enqueue_task({"type": "combined", "image_pil": img, "win_title": win_title, "source": "capture"})
+            else:
+                self._enqueue_task({"type": "translate", "image_pil": img, "win_title": win_title, "source": "capture"})
+        finally:
+            self._capture_in_progress = False
 
     # ══════════════════════════════════════════
     # 共用翻譯流程
@@ -5566,7 +5654,6 @@ class LangForgeApp:
         return COOLDOWN_SECONDS_DEFAULT
 
     def _get_remaining_cooldown(self, model=None):
-        """取得指定模型的剩餘冷卻秒數，0=可用"""
         if model is None:
             model = self.model_var.get()
         last_time = LAST_REQUEST_TIME.get(model, 0)
@@ -5637,13 +5724,11 @@ class LangForgeApp:
         return False
 
     def _start_cooldown_timer(self):
-        """啟動 UI 冷卻倒數計時器"""
         if self._cooldown_timer_id:
             self.root.after_cancel(self._cooldown_timer_id)
         self._update_cooldown_display()
 
     def _update_cooldown_display(self):
-        """每秒更新冷卻倒數顯示（欄2，不顯示模型名稱）"""
         if not hasattr(self, "cooldown_label"):
             return
         model = self.model_var.get()
@@ -5721,40 +5806,44 @@ class LangForgeApp:
     # 遊戲攻略
     # ══════════════════════════════════════════
     def start_guide_worker(self):
+        if self._capture_in_progress:
+            return
         if not self._check_cooldown_and_quota():
             return
+        self._capture_in_progress = True
         threading.Thread(target=self._guide_capture_task, daemon=True).start()
 
     def _guide_capture_task(self):
-        """截取目標視窗畫面並送出攻略請求"""
-        target = self.title_var.get().lower()
-        hwnd = None
-
-        def _handler(h, _):
-            nonlocal hwnd
-            if target in win32gui.GetWindowText(h).lower():
-                hwnd = h
-                return False
-            return True
-
-        win32gui.EnumWindows(_handler, None)
-        if not hwnd:
-            self._set_status(S("status_win_missing"), "red")
-            return
-
         try:
-            crop_top = int(self.crop_top_var.get())
-        except ValueError:
-            crop_top = 0
-        if crop_top < 0:
-            crop_top = 0
+            target = self.title_var.get().lower()
+            hwnd = None
 
-        img = self._grab_window_hwnd(hwnd, crop_top)
-        win_title = win32gui.GetWindowText(hwnd)
-        self._enqueue_task({"type": "guide", "image_pil": img, "win_title": win_title, "source": "capture"})
+            def _handler(h, _):
+                nonlocal hwnd
+                if target in win32gui.GetWindowText(h).lower():
+                    hwnd = h
+                    return False
+                return True
+
+            win32gui.EnumWindows(_handler, None)
+            if not hwnd:
+                self._set_status(S("status_win_missing"), "red")
+                return
+
+            try:
+                crop_top = int(self.crop_top_var.get())
+            except ValueError:
+                crop_top = 0
+            if crop_top < 0:
+                crop_top = 0
+
+            img = self._grab_window_hwnd(hwnd, crop_top)
+            win_title = win32gui.GetWindowText(hwnd)
+            self._enqueue_task({"type": "guide", "image_pil": img, "win_title": win_title, "source": "capture"})
+        finally:
+            self._capture_in_progress = False
 
     def _rescue_guide_from_text(self, text: str):
-        """從無法正常解析的 JSON 字串中救援 progress 與 guide 欄位"""
         progress = ""
         guide_list = []
         if not text:
@@ -5770,11 +5859,11 @@ class LangForgeApp:
             guide_list = re.findall(r'"([^"]+)"', raw_items)
         return progress, guide_list
 
-    def _do_guide(self, image_pil, win_title):
-        """送出攻略請求到 AI 引擎"""
-        eng = self.engine_var.get()
-        model = self.model_var.get()
-        api_key = self.api_entry.get().strip()
+    def _do_guide(self, image_pil, win_title, **task):
+        eng     = task.get("snap_engine",  self.engine_var.get())
+        model   = task.get("snap_model",   self.model_var.get())
+        api_key = task.get("snap_api_key", self.api_entry.get().strip())
+        tgt_lang = task.get("snap_tgt_lang", self.tgt_lang_var.get())
 
         if not api_key:
             self._set_status(S("status_no_key"), "red")
@@ -5794,7 +5883,7 @@ class LangForgeApp:
 
         # 去除 ROM 名稱中的區域標籤避免重複
         display_name = re.sub(r"\s*\((USA|Japan|Europe|J|U|E)\)", "", rom_name).strip()
-        guide_prompt = build_guide_prompt(display_name, region, self.tgt_lang_var.get())
+        guide_prompt = build_guide_prompt(display_name, region, tgt_lang)
 
         self._set_status(S("status_guide_analyzing"), "blue")
         log(f"攻略請求: {model} / {rom_name} ({region})")
@@ -5862,7 +5951,6 @@ class LangForgeApp:
                 self._set_status(S("status_guide_fail"), "red")
 
     def _render_guide(self, progress, guide_list, image_pil):
-        """將攻略結果渲染到攻略資訊視窗（黑底美觀排版）"""
         if not hasattr(self, "guide_display") or not self.guide_display.winfo_exists():
             return
 
@@ -5902,7 +5990,7 @@ class LangForgeApp:
         y += 12
 
         # ── 標題：目前攻略內容 ──
-        draw.text((pad, y), "▎目前攻略內容", font=font_header, fill=(255, 215, 0))
+        draw.text((pad, y), S("guide_section_header"), font=font_header, fill=(255, 215, 0))
         y += 32
 
         # 攻略條目
@@ -5935,8 +6023,6 @@ class LangForgeApp:
         self.guide_canvas.config(image=self.guide_tk_img)
 
     def _save_guide_log(self, rom_name, model, progress, guide_list, image_pil=None):
-        """儲存攻略紀錄到 SQLite，並存 256×256 縮圖（不含 DB）"""
-        import sqlite3
 
         try:
             ss_rel = None
@@ -5973,10 +6059,12 @@ class LangForgeApp:
     # ══════════════════════════════════════════
     # 合併翻譯+攻略（單一 REQUEST）
     # ══════════════════════════════════════════
-    def _do_combined_translate(self, image_pil, win_title):
-        eng = self.engine_var.get()
-        api_key = self.api_entry.get().strip()
-        model = self.model_var.get()
+    def _do_combined_translate(self, image_pil, win_title, **task):
+        eng      = task.get("snap_engine",  self.engine_var.get())
+        api_key  = task.get("snap_api_key", self.api_entry.get().strip())
+        model    = task.get("snap_model",   self.model_var.get())
+        src_lang = task.get("snap_src_lang", self.src_lang_var.get())
+        tgt_lang = task.get("snap_tgt_lang", self.tgt_lang_var.get())
 
         if not api_key:
             self._set_status(S("status_no_key_eng").format(engine=ENGINE_DISPLAY[eng]), "red")
@@ -5995,7 +6083,7 @@ class LangForgeApp:
             region = "Japan"
         display_name = re.sub(r"\s*\((USA|Japan|Europe|J|U|E)\)", "", rom_name).strip()
 
-        combined_prompt = build_combined_prompt(display_name, region, self.src_lang_var.get(), self.tgt_lang_var.get())
+        combined_prompt = build_combined_prompt(display_name, region, src_lang, tgt_lang)
 
         self._set_status(S("status_combo_analyzing").format(engine=ENGINE_DISPLAY[eng], model=model), "orange")
         log(f"合併請求: {model} / {display_name} ({region})")
@@ -6014,7 +6102,7 @@ class LangForgeApp:
                 guide_list = raw.get("guide", [])
             else:
                 translations = []
-                progress = "（解析失敗）"
+                progress = S("guide_parse_fail")
                 guide_list = []
 
             # 更新配額（只消耗一次）
@@ -6027,12 +6115,9 @@ class LangForgeApp:
             if translations:
                 self.last_res = translations
                 self._save_translation_log(
-                    translations,
-                    model,
-                    win_title,
-                    image_pil,
-                    target_window=self.title_var.get().strip(),
-                    platform=self.platform_var.get().strip(),
+                    translations, model, win_title, image_pil,
+                    target_window=task.get("snap_target_window", self.title_var.get().strip()),
+                    platform=task.get("snap_platform", self.platform_var.get().strip()),
                 )
 
             # 儲存攻略紀錄
@@ -6084,9 +6169,14 @@ class LangForgeApp:
     # ══════════════════════════════════════════
     # 本地 OCR + 雲端 AI 翻譯
     # ══════════════════════════════════════════
-    def _do_ocr_translate(self, image_pil, source="file", win_title=""):
-        """EasyOCR 辨識文字座標 → Groq llama-4-scout 翻譯"""
-        OCR_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+    def _do_ocr_translate(self, image_pil, source="file", win_title="", src_lang=None, tgt_lang=None, **task):
+        # 優先使用傳入的快照值，避免在 worker thread 讀取 UI 變數
+        if src_lang is None:
+            src_lang = self.src_lang_var.get()
+        if tgt_lang is None:
+            tgt_lang = self.tgt_lang_var.get()
+        target_win = task.get("snap_target_window", self.title_var.get().strip())
+        platform   = task.get("snap_platform",      self.platform_var.get().strip())
 
         # ── Step1：EasyOCR 辨識 ──
         self._set_status(S("status_ocr_running"), "orange")
@@ -6098,14 +6188,9 @@ class LangForgeApp:
             return
 
         try:
-            # OCR 語言從遊戲語言推導
-            src_lang_str = self.src_lang_var.get()
-            ocr_langs = _bcp47_to_easyocr(LANG_TO_BCP47.get(src_lang_str, "ja"))
-            # EasyOCR Reader 建立耗時（第一次需下載模型），快取在 self 上
+            ocr_langs = _bcp47_to_easyocr(LANG_TO_BCP47.get(src_lang, "ja"))
             if not hasattr(self, "_easyocr_reader") or self._easyocr_langs != ocr_langs:
                 log(f"[OCR] 初始化 EasyOCR langs={ocr_langs}")
-                import warnings, logging
-
                 warnings.filterwarnings("ignore")
                 logging.getLogger("easyocr").setLevel(logging.ERROR)
                 logging.getLogger("torch").setLevel(logging.ERROR)
@@ -6113,170 +6198,170 @@ class LangForgeApp:
                 self._easyocr_langs = ocr_langs
 
             import numpy as np
-
-            img_np = np.array(image_pil)
+            # 縮放圖片以加速 EasyOCR（保留原始尺寸用於座標還原）
+            orig_w, orig_h = image_pil.width, image_pil.height
+            ocr_img, scale = _resize_for_ocr(image_pil)
+            img_np = np.array(ocr_img)
             ocr_results = self._easyocr_reader.readtext(img_np)
-            # 過濾低信心值結果（門檻 0.3，低於此值視為雜訊）
-            OCR_CONF_THRESHOLD = 0.1
             ocr_results = [r for r in ocr_results if r[2] >= OCR_CONF_THRESHOLD]
             if not ocr_results:
                 self._set_status(S("status_ocr_no_text"), "gray")
                 self._stamp_elapsed()
                 return
-            log(f"[OCR] 偵測到 {len(ocr_results)} 個文字區塊（信心值 ≥ {OCR_CONF_THRESHOLD}）")
-            orig_w, orig_h = image_pil.width, image_pil.height
-            for i, (bbox, text, conf) in enumerate(ocr_results):
-                log(f"[OCR] {i+1}: {text!r} (conf={conf:.2f})")
+            log(f"[OCR] 偵測到 {len(ocr_results)} 個文字區塊（信心值 ≥ {OCR_CONF_THRESHOLD}，縮放比={scale:.2f}）")
         except Exception as e:
             self._set_status(S("status_ocr_fail").format(msg=str(e)[:60]), "red")
             self._stamp_elapsed()
             return
 
-        # ── Step2：Google 翻譯（urllib，無需 API Key）──
+        # ── Step2：Google 翻譯（並行）──
         self._set_status(S("status_ocr_translating"), "orange")
         try:
-            src_lang = self.src_lang_var.get()
-            tgt_lang = self.tgt_lang_var.get()
             src_bcp = LANG_TO_BCP47.get(src_lang, "auto")
             tgt_bcp = LANG_TO_BCP47.get(tgt_lang, "zh-TW")
+            texts = [text for _, text, _ in ocr_results]
 
-            translations = {}
-            for i, (bbox, text, conf) in enumerate(ocr_results):
-                translated = _google_translate(text, src_bcp, tgt_bcp)
-                translations[i + 1] = translated
-                log(f"[OCR→GT] {i+1}: {text!r} → {translated!r}")
-
+            with ThreadPoolExecutor(max_workers=min(OCR_TRANSLATE_WORKERS, len(texts))) as pool:
+                translated_list = list(pool.map(
+                    lambda t: _google_translate(t, src_bcp, tgt_bcp), texts
+                ))
         except Exception as e:
             self._set_status(S("status_gt_fail").format(msg=str(e)[:60]), "red")
             self._stamp_elapsed()
             return
 
-        # ── Step3：組合 segments（OCR 座標 + AI 譯文）──
+        # ── Step3：組合 segments（座標還原至原始尺寸）──
         segments = []
-        for i, (bbox, text, conf) in enumerate(ocr_results):
-            tw = translations.get(i + 1, text)
-            # bbox: [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
-            xs = [p[0] for p in bbox]
-            ys = [p[1] for p in bbox]
-            x0 = min(xs) / orig_w
-            y0 = min(ys) / orig_h
-            w = (max(xs) - min(xs)) / orig_w
-            h = (max(ys) - min(ys)) / orig_h
-            segments.append(
-                {
-                    "tw": tw,
-                    "x": round(x0, 4),
-                    "y": round(y0, 4),
-                    "w": round(w, 4),
-                    "h": round(h, 4),
-                }
-            )
+        for (bbox, text, conf), tw in zip(ocr_results, translated_list):
+            # bbox 座標是縮放後的，需除以 scale 還原，再正規化至 0~1
+            xs = [p[0] / scale for p in bbox]
+            ys = [p[1] / scale for p in bbox]
+            segments.append({
+                "tw": tw,
+                "x": round(min(xs) / orig_w, 4),
+                "y": round(min(ys) / orig_h, 4),
+                "w": round((max(xs) - min(xs)) / orig_w, 4),
+                "h": round((max(ys) - min(ys)) / orig_h, 4),
+            })
 
         if not segments:
             self._set_status(S("status_ocr_no_result"), "gray")
             self._stamp_elapsed()
             return
 
-        # ── Step4：儲存 + 渲染（Google 翻譯不消耗引擎配額）──
+        # ── Step4：儲存 + 渲染 ──
         self._set_status(S("status_ocr_done").format(n=len(segments)), "green")
         self._stamp_elapsed()
 
         if source == "capture" and segments:
             self._save_translation_log(
-                segments,
-                "OCR+GoogleTranslate",
-                win_title,
-                image_pil,
-                target_window=self.title_var.get().strip(),
-                platform=self.platform_var.get().strip(),
+                segments, "OCR+GoogleTranslate", win_title, image_pil,
+                target_window=target_win,
+                platform=platform,
             )
 
         self.root.after(0, lambda _s=segments, _img=image_pil: self.render(_s, _img, source))
 
-    def _do_translate(self, image_pil, source="file", win_title=""):
-        translate_prompt = build_translate_prompt(self.src_lang_var.get(), self.tgt_lang_var.get())
+    def _do_translate(self, image_pil, source="file", win_title="", **task):
+        # 任務實際開始執行時重置計時器（在主執行緒透過 after 同步執行）
+        if threading.current_thread() is threading.main_thread():
+            self._start_elapsed_timer()
+        else:
+            evt = threading.Event()
+            self.root.after(0, lambda: (self._start_elapsed_timer(), evt.set()))
+            evt.wait(timeout=2)
+
+        # 優先使用 enqueue 時的快照值，確保 worker thread 不直接讀取 UI 變數
+        src_lang     = task.get("snap_src_lang",     self.src_lang_var.get())
+        tgt_lang     = task.get("snap_tgt_lang",     self.tgt_lang_var.get())
+        engine_mode  = task.get("snap_engine_mode",  self.engine_mode_var.get() if getattr(self, "engine_mode_var", None) else "cloud")
+        eng          = task.get("snap_engine",       self.engine_var.get())
+        model        = task.get("snap_model",        self.model_var.get())
+        api_key      = task.get("snap_api_key",      self.api_entry.get().strip())
+        ollama_model = task.get("snap_ollama_model", self.ollama_model_var.get() if hasattr(self, "ollama_model_var") else "")
+        target_win   = task.get("snap_target_window", self.title_var.get().strip())
+        platform     = task.get("snap_platform",     self.platform_var.get().strip())
+        try:
+            ollama_timeout = int(task.get("snap_ollama_timeout", self.ollama_timeout_var.get() if hasattr(self, "ollama_timeout_var") else str(OLLAMA_TIMEOUT)))
+            if ollama_timeout <= 0:
+                ollama_timeout = OLLAMA_TIMEOUT
+        except (ValueError, AttributeError):
+            ollama_timeout = OLLAMA_TIMEOUT
+
+        translate_prompt = build_translate_prompt(src_lang, tgt_lang)
 
         # ── OCR 模式優先判斷 ──
-        if getattr(self, "engine_mode_var", None) and self.engine_mode_var.get() == "ocr":
-            self._do_ocr_translate(image_pil, source, win_title)
+        if engine_mode == "ocr":
+            self._do_ocr_translate(
+                image_pil, source, win_title,
+                src_lang=src_lang, tgt_lang=tgt_lang,
+                snap_target_window=target_win,
+                snap_platform=platform,
+            )
             return
 
         # ── OLLAMA 優先判斷 ──
-        use_ollama = getattr(self, "use_ollama_var", None) and self.use_ollama_var.get() and self._ollama_available
+        use_ollama = (engine_mode == "local" and self._ollama_available)
         if use_ollama:
-            ollama_model = self.ollama_model_var.get()
             if not ollama_model:
                 self._set_status(S("status_ollama_no_model"), "red")
                 return
-            try:
-                ollama_timeout = int(self.ollama_timeout_var.get())
-                if ollama_timeout <= 0:
-                    ollama_timeout = OLLAMA_TIMEOUT
-            except (ValueError, AttributeError):
-                ollama_timeout = OLLAMA_TIMEOUT
             self._set_status(S("status_ollama_running").format(t=ollama_timeout), "orange")
             try:
                 res = call_ollama(ollama_model, image_pil, translate_prompt, timeout=ollama_timeout)
+                if isinstance(res, list) and len(res) == 0:
+                    self._set_status(S("status_ollama_empty"), "gray")
+                    self._stamp_elapsed()
+                    return
             except TimeoutError as e:
                 log(f"OLLAMA timeout: {e}")
                 self._set_status(S("status_ollama_timeout"), "red")
-                res = []
+                self._stamp_elapsed()
+                return
             except ValueError as e:
                 err_msg = str(e)
                 if err_msg.startswith("JSON_PARSE_FAIL|"):
                     parts = err_msg.split("|", 2)
                     self._log_json_debug(
-                        "ollama",
-                        ollama_model,
+                        "ollama", ollama_model,
                         parts[1] if len(parts) > 1 else "unknown",
                         parts[2] if len(parts) > 2 else "",
                     )
-                    self._set_status(S("status_json_fail"), "red")
+                    self._set_status(S("status_ollama_aborted"), "red")
                 else:
                     log(f"OLLAMA 解析錯誤: {err_msg[:80]}")
-                    self._set_status(S("status_parse_error").format(msg=err_msg[:60]), "red")
-                res = []
+                    self._set_status(S("status_ollama_aborted"), "red")
+                self._stamp_elapsed()
+                return
             except Exception as e:
                 log(f"OLLAMA 呼叫失敗: {e}")
                 self._set_status(S("status_ollama_fail").format(err=str(e)[:60]), "red")
-                res = []
-            # 無論成功或失敗，都停止計時並恢復就緒狀態
-            if not res:
                 self._stamp_elapsed()
-            if res:
-                self.last_res = res
-                self.config["used_today"][ollama_model] = self.config["used_today"].get(ollama_model, 0) + 1
-                self._safe_save_config()
-                self._set_status(S("status_done"), "green")
-                self._stamp_elapsed()
-                log(f"OLLAMA ({ollama_model}) 翻譯成功，共 {len(res)} 段")
-                if source == "capture" and res:
-                    self._save_translation_log(
-                        res,
-                        ollama_model,
-                        win_title,
-                        image_pil,
-                        target_window=self.title_var.get().strip(),
-                        platform=self.platform_var.get().strip(),
-                    )
-            if res:
-                self.root.after(0, lambda _r=res, _img=image_pil, _s=source: self.render(_r, _img, _s))
+                return
+            self.last_res = res
+            self.config["used_today"][ollama_model] = self.config["used_today"].get(ollama_model, 0) + 1
+            self._safe_save_config()
+            self._set_status(S("status_ollama_done").format(n=len(res)), "green")
+            self._stamp_elapsed()
+            log(f"OLLAMA ({ollama_model}) 翻譯成功，共 {len(res)} 段")
+            if source == "capture" and res:
+                self._save_translation_log(
+                    res, ollama_model, win_title, image_pil,
+                    target_window=target_win, platform=platform,
+                )
+            self.root.after(0, lambda _r=res, _img=image_pil, _s=source: self.render(_r, _img, _s))
             return
 
         # ── 雲端引擎流程 ──
-        eng = self.engine_var.get()
-        api_key = self.api_entry.get().strip()
-        model = self.model_var.get()
-
         if not api_key:
             self._set_status(S("status_no_key_eng").format(engine=ENGINE_DISPLAY[eng]), "red")
+            self._stamp_elapsed()
             return
 
         self._set_status(S("status_analyzing").format(engine=ENGINE_DISPLAY[eng], model=model), "orange")
 
         try:
             caller = ENGINE_CALLERS[eng]
-            translate_prompt = build_translate_prompt(self.src_lang_var.get(), self.tgt_lang_var.get())
             res = caller(api_key, model, image_pil, translate_prompt)
 
         except ValueError as e:
@@ -6345,13 +6430,11 @@ class LangForgeApp:
             # 畫面擷取模式：儲存翻譯紀錄
             if source == "capture" and res:
                 self._save_translation_log(
-                    res,
-                    model,
-                    win_title,
-                    image_pil,
-                    target_window=self.title_var.get().strip(),
-                    platform=self.platform_var.get().strip(),
+                    res, model, win_title, image_pil,
+                    target_window=target_win, platform=platform,
                 )
+        else:
+            self._stamp_elapsed()
 
         self.root.after(0, lambda _r=res, _img=image_pil, _s=source: self.render(_r, _img, _s))
 
@@ -6363,8 +6446,6 @@ class LangForgeApp:
     DB_PATH = os.path.join(LOG_DIR, "translations.db")
 
     def _init_db(self):
-        """初始化 SQLite 資料庫"""
-        import sqlite3
 
         os.makedirs(self.LOG_DIR, exist_ok=True)
         conn = sqlite3.connect(self.DB_PATH)
@@ -6441,10 +6522,11 @@ class LangForgeApp:
         conn.close()
         # 補算舊場次的 dir_size_kb
         self.root.after(500, self._backfill_session_sizes)
+        # 建立 Tab4 讀取用的持久連線（唯讀模式，避免反覆 connect/close）
+        self._db_conn = sqlite3.connect(self.DB_PATH, check_same_thread=False)
+        self._db_conn.row_factory = sqlite3.Row
 
     def _backfill_session_sizes(self):
-        """補算歷史場次目錄大小（dir_size_kb=0 的場次）。"""
-        import sqlite3
 
         try:
             conn = sqlite3.connect(self.DB_PATH)
@@ -6463,8 +6545,6 @@ class LangForgeApp:
             log(f"[DB] 補算場次大小失敗: {e}")
 
     def _save_translation_log(self, segments, model, win_title, image_pil, target_window="", platform=""):
-        """儲存翻譯紀錄到 SQLite + 截圖到對應遊戲目錄"""
-        import sqlite3
 
         try:
             # 從視窗標題擷取 ROM 名稱
@@ -6523,8 +6603,6 @@ class LangForgeApp:
     # 翻譯結果視窗導覽
     # ══════════════════════════════════════════
     def _nav_reload(self):
-        """重新從 DB 載入同遊戲所有翻譯 id，更新導覽列顯示。"""
-        import sqlite3
 
         if not self._nav_rom_name:
             return
@@ -6542,7 +6620,6 @@ class LangForgeApp:
         self._nav_update_bar()
 
     def _nav_update_bar(self):
-        """更新導覽列按鈕狀態與計數文字。"""
         total = len(self._nav_ids)
         if total == 0:
             self._nav_label.config(text="")
@@ -6555,8 +6632,6 @@ class LangForgeApp:
         self._nav_next_btn.config(state="normal" if self._nav_index < total - 1 else "disabled")
 
     def _nav_go(self, index: int):
-        """跳到指定 index 的歷史紀錄並渲染。"""
-        import sqlite3
 
         if index < 0 or index >= len(self._nav_ids):
             return
@@ -6586,19 +6661,15 @@ class LangForgeApp:
             log(f"[Nav] 載入歷史失敗: {e}")
 
     def _nav_prev(self):
-        """往舊（index-1）"""
         self._nav_go(self._nav_index - 1)
 
     def _nav_next(self):
-        """往新（index+1）"""
         self._nav_go(self._nav_index + 1)
 
     # ══════════════════════════════════════════
     # 攻略視窗導覽
     # ══════════════════════════════════════════
     def _guide_nav_reload(self):
-        """重新從 DB 載入同遊戲所有攻略 id（ASC），跳到最新。"""
-        import sqlite3
 
         if not self._guide_nav_rom_name:
             return
@@ -6615,7 +6686,6 @@ class LangForgeApp:
         self._guide_nav_update_bar()
 
     def _guide_nav_update_bar(self):
-        """更新攻略導覽列按鈕狀態與計數文字。"""
         total = len(self._guide_nav_ids)
         if not (hasattr(self, "_guide_nav_label") and self._guide_nav_label.winfo_exists()):
             return
@@ -6630,8 +6700,6 @@ class LangForgeApp:
         self._guide_nav_next_btn.config(state="normal" if self._guide_nav_index < total - 1 else "disabled")
 
     def _guide_nav_go(self, index: int):
-        """跳到指定 index 的歷史攻略並重新渲染。"""
-        import sqlite3
 
         if index < 0 or index >= len(self._guide_nav_ids):
             return
@@ -6693,14 +6761,12 @@ class LangForgeApp:
             out_h = int(orig_h * scale)
             image_pil = image_pil.resize((out_w, out_h), Image.LANCZOS)
         elif source == "history":
-            # 歷史模式：縮放到目標寬度，不限高度，保持原始比例
             orig_w, orig_h = image_pil.width, image_pil.height
             scale = _target_w / orig_w
             out_w = int(orig_w * scale)
             out_h = int(orig_h * scale)
             image_pil = image_pil.resize((out_w, out_h), Image.LANCZOS)
         else:
-            # capture 模式：縮放到目標寬度，同時限制高度不超過螢幕高度
             orig_w, orig_h = image_pil.width, image_pil.height
             scale_w = _target_w / orig_w
             max_h = self.root.winfo_screenheight() - 80
@@ -6709,6 +6775,34 @@ class LangForgeApp:
             out_w = int(orig_w * scale)
             out_h = int(orig_h * scale)
             image_pil = image_pil.resize((out_w, out_h), Image.LANCZOS)
+
+        # ── 座標診斷 LOG（DEBUG_COORD=True 時輸出）──
+        _all_sx = [float(s.get("x", 0)) for s in segments]
+        _all_sy = [float(s.get("y", 0)) for s in segments]
+        _group_px_x = max(_all_sx) > 1.0
+        _group_px_y = max(_all_sy) > 1.0
+        if DEBUG_COORD:
+            log(f"[COORD] 原圖={orig_w}x{orig_h} 顯示={out_w}x{out_h} scale={scale:.3f} source={source}")
+            _px_fix_count = 0
+            for i, s in enumerate(segments):
+                sx_raw = float(s.get("x", 0))
+                sy_raw = float(s.get("y", 0))
+                tw_preview = s.get("tw", "")[:12].replace("\n", " ")
+                if _group_px_x or _group_px_y:
+                    _px_fix_count += 1
+                    sx_c = (sx_raw / orig_w) if _group_px_x else sx_raw
+                    sy_c = (sy_raw / orig_h) if _group_px_y else sy_raw
+                    if sx_c > 1.0: sx_c = sx_raw / max(_all_sx)
+                    if sy_c > 1.0: sy_c = sy_raw / max(_all_sy)
+                    sx_c = max(0.02, min(0.98, sx_c))
+                    sy_c = max(0.02, min(0.98, sy_c))
+                    tag_x = "⚠超出" if sx_raw > orig_w else ""
+                    tag_y = "⚠超出" if sy_raw > orig_h else ""
+                    log(f"[COORD] seg[{i}] 像素 x={sx_raw:.0f}{tag_x} y={sy_raw:.0f}{tag_y} → 修正後比例({sx_c:.3f},{sy_c:.3f}) → 畫面({int(sx_c*out_w)},{int(sy_c*out_h)}) | {tw_preview!r}")
+                else:
+                    log(f"[COORD] seg[{i}] 比例 x={sx_raw:.3f} y={sy_raw:.3f} → 畫面({int(sx_raw*out_w)},{int(sy_raw*out_h)}) | {tw_preview!r}")
+            if _px_fix_count:
+                log(f"[COORD] ⚠ 共 {_px_fix_count}/{len(segments)} 筆像素座標，x軸{'像素' if _group_px_x else '比例'} y軸{'像素' if _group_px_y else '比例'}")
 
         is_vertical = self.text_dir_var.get() == "vertical"
         if is_vertical:
@@ -6721,26 +6815,44 @@ class LangForgeApp:
 
         # 收集非空譯文及其座標
         items = []
+
+        # ── 座標預處理：x/y 軸分開處理，各自獨立修正 ──
+        # 先收集原始值
+        raw_coords = []
         for s in sorted_segs:
             tw = s.get("tw", "").replace("\n", " ").replace("\r", "").strip()
             if tw:
-                sx = float(s.get("x", 0.05))
-                sy = float(s.get("y", 0.1))
-                # 自動偵測並正規化：若模型回傳像素值而非比例值，則除以原始圖片尺寸
-                if sx > 1.0:
+                raw_coords.append((tw, float(s.get("x", 0.05)), float(s.get("y", 0.1))))
+
+        if raw_coords:
+            all_sx = [c[1] for c in raw_coords]
+            all_sy = [c[2] for c in raw_coords]
+            max_sx = max(all_sx)
+            max_sy = max(all_sy)
+
+            # 判斷整組 x/y 是否為像素座標：任一值 > 1.0 即整組視為像素
+            group_is_px_x = max_sx > 1.0
+            group_is_px_y = max_sy > 1.0
+
+            for tw, sx, sy in raw_coords:
+                # X 軸：像素 → 除以原圖寬，超出範圍夾邊
+                if group_is_px_x:
                     sx = sx / orig_w
-                if sy > 1.0:
+                sx = max(0.02, min(0.98, sx))
+
+                # Y 軸：像素 → 除以原圖高，超出範圍夾邊
+                if group_is_px_y:
                     sy = sy / orig_h
-                sx = max(0.0, min(1.0, sx))
-                sy = max(0.0, min(1.0, sy))
+                sy = max(0.02, min(0.98, sy))
+
                 items.append((tw, sx, sy))
         if not items:
             return
 
         # ── 方向E：render 前合併相近 segment（防疊字預處理）──
-        # 先還原成 dict 格式供 _merge_segments 處理，再轉回 tuple
+        # x_thresh=0.03：同欄判斷；y_thresh=0.04：同行判斷（對話框多行間距通常 >0.05）
         raw_dicts = [{"tw": tw, "x": sx, "y": sy, "w": 0.1, "h": 0.05} for tw, sx, sy in items]
-        merged = _merge_segments(raw_dicts, x_thresh=0.05, y_thresh=0.02)
+        merged = _merge_segments(raw_dicts, x_thresh=0.03, y_thresh=0.04)
         items = [(m["tw"].replace("\n", " "), m["x"], m["y"]) for m in merged]
 
         items.sort(key=lambda t: t[2])  # 依 sy 升序：y 小的（選單）先於 y 大的（對話框）
@@ -6839,6 +6951,8 @@ class LangForgeApp:
 
             draw_wrapped_text_safe(draw, tw, draw_x + 1, draw_y + 1, font, out_w, out_h, (0, 0, 0))
             draw_wrapped_text_safe(draw, tw, draw_x, draw_y, font, out_w, out_h, "white")
+            if DEBUG_COORD:
+                log(f"[COORD] 繪製 ({draw_x},{draw_y}) norm_x={sx:.3f} norm_y={sy:.3f} raw_y={int(sy*out_h)} final_y={draw_y} | {tw[:12]!r}")
             col_next_y[col] = draw_y + block_h
 
         if source == "capture":
@@ -6859,7 +6973,6 @@ class SplashScreen:
     """啟動載入畫面（Toplevel，主視窗建完後自動關閉）"""
 
     def __init__(self, root):
-        self._root = root
         self.win = tk.Toplevel(root)
         self.win.overrideredirect(True)          # 無標題列
         self.win._lf_no_theme = True             # 標記：不受主題套用影響
