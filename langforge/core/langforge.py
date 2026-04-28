@@ -1,4 +1,4 @@
-"""LangForge V1.0.1-beta.8
+"""LangForge V1.1.0
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -169,7 +169,7 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.0.1-beta.8"
+ABOUT_VERSION = "V1.1.0"
 DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
@@ -370,8 +370,10 @@ UI_STRINGS = {
         "th_used": "已用",
         "th_limit": "上限",
         "quota_no_limit": "無額度",
+        "quota_conservative": "保守額度(50)",
         "quota_no_free": "⚠ 無免費額度",
         "quota_switch": "無免費額度 (limit=0)，請換模型",
+        "quota_estimated": "推估{n}",
         # ── 選單列 ──
         "menu_file": "檔案",
         "menu_exit": "結束",
@@ -461,6 +463,8 @@ UI_STRINGS = {
         "dlg_name_prompt": "名稱:",
         "dlg_new_name_prompt": "新名稱:",
         "status_model_list_updated": "已更新 {engine} 模型清單（{n} 個）",
+        "status_fetching_models":     "{engine} 模型清單更新中...",
+        "status_fetch_models_failed": "{engine} API 無回應，已套用內建清單",
         "lbl_guide_toggle_on": "開啟",
         "lbl_guide_toggle_off": "關閉",
         "dlg_file_title": "選擇圖片檔案",
@@ -470,6 +474,12 @@ UI_STRINGS = {
         "guide_parse_fail": "（解析失敗）",
         "status_queue_cleared": "已清空佇列（{n} 筆）",
         "status_queue_empty": "佇列已是空的",
+        "status_auto_switched": "自動切換至 {engine} / {model}",
+        "status_quota_exhausted_hint": "所有引擎額度已用完，請明日再試或新增自訂引擎",
+        "lf_overlay_settings": "疊字顯示設定",
+        "lbl_font_size": "字體大小:",
+        "lbl_auto_switch": "自動備援設定:",
+        "cb_auto_switch_skip_no_key": "只考慮已填入 API Key 的引擎",
     },
     "en": {
         # ── Tabs ──
@@ -699,8 +709,10 @@ UI_STRINGS = {
         "th_used": "Used",
         "th_limit": "Limit",
         "quota_no_limit": "No Quota",
+        "quota_conservative": "Est.(50)",
         "quota_no_free": "⚠ No Free Quota",
         "quota_switch": "No free quota (limit=0), please switch model",
+        "quota_estimated": "Est.{n}",
         # ── Menu ──
         "menu_file": "File",
         "menu_exit": "Exit",
@@ -789,6 +801,8 @@ UI_STRINGS = {
         "dlg_name_prompt": "Name:",
         "dlg_new_name_prompt": "New name:",
         "status_model_list_updated": "{engine} model list updated ({n} models)",
+        "status_fetching_models":     "Fetching {engine} model list...",
+        "status_fetch_models_failed": "{engine} API unavailable, using built-in list",
         "lbl_guide_toggle_on": "On",
         "lbl_guide_toggle_off": "Off",
         "dlg_file_title": "Select Image File",
@@ -798,6 +812,12 @@ UI_STRINGS = {
         "guide_parse_fail": "(parse failed)",
         "status_queue_cleared": "Queue cleared ({n} tasks)",
         "status_queue_empty": "Queue is already empty",
+        "status_auto_switched": "Auto-switched to {engine} / {model}",
+        "status_quota_exhausted_hint": "All engine quotas exhausted. Try again tomorrow or add a custom engine.",
+        "lf_overlay_settings": "Overlay Settings",
+        "lbl_font_size": "Font Size:",
+        "lbl_auto_switch": "Auto-fallback:",
+        "cb_auto_switch_skip_no_key": "Only engines with API Key filled in",
     },
 }
 
@@ -848,12 +868,22 @@ def _get_monitors():
 # ==========================================
 # 配置與流量控制
 # ==========================================
-TARGET_DISPLAY_WIDTH = 600  # 預設顯示寬度
-DISPLAY_WIDTH_LARGE = 900  # 寬螢幕來源時使用
-WIDE_SOURCE_THRESHOLD = 1800  # 原圖寬度超過此值則切換至 LARGE
+IMG_SMALL_THRESHOLD  = 512
+IMG_MEDIUM_THRESHOLD = 1280
+
+IMG_CLOUD_SMALL  = (None, 85)
+IMG_CLOUD_MEDIUM = (1024, 80)
+IMG_CLOUD_LARGE  = (1280, 75)
+
+IMG_OLLAMA_SMALL  = (None, 85)
+IMG_OLLAMA_MEDIUM = (800,  75)
+IMG_OLLAMA_LARGE  = (1024, 70)
+
+DISPLAY_WIDTH_SMALL      = 512
+DISPLAY_WIDTH_MEDIUM_PX1 = 700    # 原圖 513～700px 時輸出
+DISPLAY_WIDTH_MEDIUM_PX2 = 1024   # 原圖 701～1280px 時輸出
+DISPLAY_WIDTH_LARGE      = 1280
 DISPLAY_INIT_HEIGHT = 600
-PLAYBACK_DISPLAY_WIDTH = 600  # 播放視窗預設寬度
-PLAYBACK_DISPLAY_WIDTH_LARGE = 900  # 播放視窗寬螢幕寬度
 PLAYBACK_FPS_MS = 500  # 播放間隔 ms（2fps）
 PLAYBACK_DELAY_SECONDS = 600  # 延遲播放秒數（10分鐘）
 SESSION_CAPTURE_INTERVAL_MS = 500  # 場次截圖間隔 ms
@@ -1004,12 +1034,12 @@ TARGET_LANGUAGES = [
 # 每個模型的每日限額（RPD）— 依各平台後台實際數據（2026/04）
 # ══════════════════════════════════════════
 MODEL_DAILY_LIMITS = {
-    # ── Gemini 免費版 ──
-    "gemini-2.5-flash": 20,                     # RPM=5
-    "gemini-2.5-flash-lite": 500,               # GA，RPM=30
-    "gemini-3-flash-preview": 20,               # RPM=5（preview）
-    "gemini-3.1-flash-lite-preview": 500,       # preview，RPM=30
-    "gemini-3.1-pro-preview": 0,                # 付費
+    # ── Gemini ──
+    "gemini-3-flash":           500,   # 新一代 Flash，免費配額縮減版
+    "gemini-3.1-flash-lite":    500,   # 最便宜新一代，免費配額縮減版
+    "gemini-2.5-flash":          20,   # RPM=5，免費 20 RPD
+    "gemini-2.5-flash-lite":    500,   # GA，高配額 500 RPD
+    "gemini-3.1-pro":             0,   # 付費，無免費配額
     # ── Groq 免費版 ──
     "meta-llama/llama-4-scout-17b-16e-instruct": 1000,   # RPM=30
     "openai/gpt-oss-120b": 500,             # Maverick 替代，RPM=30
@@ -1031,10 +1061,11 @@ MODEL_DAILY_LIMITS = {
 
 # 各模型 RPM（用於冷卻計算；未列的使用預設）
 MODEL_RPM = {
-    "gemini-2.5-flash": 5,
+    "gemini-3-flash":        15,
+    "gemini-3.1-flash-lite": 30,
+    "gemini-2.5-flash":       5,
     "gemini-2.5-flash-lite": 30,
-    "gemini-3-flash-preview": 5,
-    "gemini-3.1-flash-lite-preview": 30,
+    "gemini-3.1-pro":        10,
     "meta-llama/llama-4-scout-17b-16e-instruct": 30,
     "openai/gpt-oss-120b": 30,
     "mistral-small-latest": 30,
@@ -1060,11 +1091,11 @@ ENGINE_DISPLAY = {
 
 ENGINE_MODELS = {
     "gemini": [
-        "gemini-2.5-flash",              # 推薦：免費 20 RPD，RPM=5
-        "gemini-2.5-flash-lite",         # GA，高配額 500 RPD
-        "gemini-3-flash-preview",        # 最新 Flash preview
-        "gemini-3.1-flash-lite-preview", # preview，500 RPD，RPM=30
-        "gemini-3.1-pro-preview",        # 付費旗艦
+        "gemini-3-flash",                  # 推薦：新一代 Flash，效能優於 2.5
+        "gemini-3.1-flash-lite",           # 高配額免費，適合大量請求
+        "gemini-2.5-flash",                # 穩定版，免費 20 RPD
+        "gemini-2.5-flash-lite",           # GA，高配額 500 RPD
+        "gemini-3.1-pro",                  # 付費旗艦
     ],
     "groq": [
         "meta-llama/llama-4-scout-17b-16e-instruct",  # 推薦：1000 RPD，視覺
@@ -1091,7 +1122,7 @@ ENGINE_MODELS = {
 }
 
 ENGINE_DEFAULT_MODEL = {
-    "gemini": "gemini-2.5-flash",
+    "gemini": "gemini-3-flash",
     "groq": "meta-llama/llama-4-scout-17b-16e-instruct",
     "mistral": "mistral-small-latest",
     "openai": "gpt-4.1-mini",
@@ -1196,6 +1227,18 @@ def load_config():
                 encrypted = raw.startswith(_OBFUSCATED_PREFIX)
         data.setdefault("hotkey", DEFAULT_HOTKEY)
         data.setdefault("ui_lang", _detect_ui_lang())
+        data.setdefault("overlay_font_size", OVERLAY_FONT_SIZE_DEFAULT)
+        data.setdefault("auto_switch_skip_no_key", True)
+        data.setdefault("cached_models", {})
+        data.setdefault("learned_zero_quota", [])
+        data.setdefault("custom_quota", {})
+        data.setdefault("estimated_quota_models", [])
+        # 還原學習到的 limit=0 模型
+        for _m in data.get("learned_zero_quota", []):
+            MODEL_DAILY_LIMITS[_m] = 0
+        # 還原使用者/程式自訂的配額覆寫
+        for _m, _v in data.get("custom_quota", {}).items():
+            MODEL_DAILY_LIMITS[_m] = _v
         data["auto_trans"] = False  # 自動翻譯不記憶，每次啟動固定關閉
         return data
     except Exception as e:
@@ -1231,15 +1274,22 @@ def build_translate_prompt(src_lang: str, tgt_lang: str) -> str:
         f"你是遊戲翻譯專家。請辨識這張遊戲截圖中所有的 {src_desc}，"
         f"並將每一段翻譯成 {tgt_lang}。"
         f"注意：'tw' 欄位必須填入 {tgt_lang} 的翻譯結果，絕對不要填入原文。\n"
+        "【專有名詞規則】以下類型請直接保留原文，不要翻譯：\n"
+        "- 角色名稱、人名（例如：ルナナ、アグラニ 等）\n"
+        "- 遊戲內地名、場所名稱（例如：アグラニの村、ダーマ神殿 等）\n"
+        "- 遊戲專有技能名、道具名、組織名、種族名\n"
+        "- 難以用目標語言表達、只能音譯的固有名詞\n"
+        "若整段文字只有角色名稱或專有名詞（無實質對話內容），仍需回傳，'tw' 填入原文。\n"
         "回傳格式為純 JSON 列表（不要包含 markdown 標記），每個元素包含：\n"
-        f"- 'tw': 翻譯結果（{tgt_lang}，不是原文）\n"
+        f"- 'tw': 翻譯結果（{tgt_lang}，專有名詞保留原文，其餘翻譯）\n"
         "- 'x': 文字區塊左上角的水平位置（必須是 0.0~1.0 之間的小數比例值，絕對不可以是像素數值）\n"
         "- 'y': 文字區塊左上角的垂直位置（必須是 0.0~1.0 之間的小數比例值，絕對不可以是像素數值）\n"
         "- 'w': 文字區塊的寬度（必須是 0.0~1.0 之間的小數比例值）\n"
         "- 'h': 文字區塊的高度（必須是 0.0~1.0 之間的小數比例值）\n"
         "重要：x/y/w/h 全部必須是 0.0~1.0 的浮點數，例如畫面下方 75% 處寫 0.75，不可寫 480 這類像素值。\n"
-        "每個視覺上獨立的文字框必須單獨回傳為一個 segment，不同位置的文字不可合併。"
-        "即使多個文字框內容相關（如角色名稱列表），只要位置不同就各自獨立回傳，x/y 準確對應各自的位置。\n"
+        "每個視覺上獨立的文字框必須單獨回傳為一個 segment，不同位置的文字不可合併。\n"
+        "特別注意：角色名稱框（通常在對話框上方或左側）與對話內容框是兩個不同位置，必須分為兩個 segment 各自回傳，x/y 分別對應各自框的位置。\n"
+        "即使多個文字框內容相關（如角色名稱與其對話），只要位置不同就各自獨立回傳，x/y 準確對應各自的位置。\n"
         '範例: [{"tw": "翻譯文字", "x": 0.05, "y": 0.75, "w": 0.4, "h": 0.08}]\n'
         f"如果{no_text_cond}，回傳空列表 []。只回傳 JSON，不要有其他文字。"
     )
@@ -1272,14 +1322,21 @@ def build_combined_prompt(rom_name: str, region: str, src_lang: str, tgt_lang: s
         f"你是遊戲翻譯與攻略專家。這是一張來自『{rom_name}』（{region}版本）的遊戲截圖。\n"
         "請同時完成以下兩件任務，並以單一 JSON 回傳（不要包含 markdown 標記）：\n\n"
         f"任務一【翻譯】辨識截圖中所有 {src_desc}，翻譯成 {tgt_lang}。\n"
+        "【專有名詞規則】以下類型請直接保留原文，不要翻譯：\n"
+        "- 角色名稱、人名\n"
+        "- 遊戲內地名、場所名稱\n"
+        "- 遊戲專有技能名、道具名、組織名、種族名\n"
+        "- 難以用目標語言表達、只能音譯的固有名詞\n"
+        "若整段文字只有角色名稱或專有名詞，仍需回傳，'tw' 填入原文。\n"
         f"任務二【攻略】根據畫面分析目前進度並給出 {tgt_lang} 攻略建議。\n\n"
         "回傳格式：\n"
-        '{{"translations": [{{"tw": "翻譯文字", "x": 0.05, "y": 0.75, "w": 0.4, "h": 0.08}}], '
+        '{{"translations": [{{"tw": "翻譯文字（專有名詞保留原文）", "x": 0.05, "y": 0.75, "w": 0.4, "h": 0.08}}], '
         '"progress": "目前進度描述", '
         '"guide": ["攻略建議1", "攻略建議2", "攻略建議3"]}}\n'
         "注意：\n"
-        f"- 'tw' 欄位必須填入 {tgt_lang} 的翻譯結果，絕對不要填入原文\n"
+        f"- 'tw' 欄位必須填入 {tgt_lang} 的翻譯結果（專有名詞除外保留原文），絕對不要翻譯專有名詞\n"
         "- x/y/w/h 必須是 0.0~1.0 的浮點數比例值，絕對不可以是像素數值（例如畫面下方 75% 處寫 0.75，不可寫 480）\n"
+        "- 角色名稱框與對話內容框位置不同，必須分為兩個 segment 各自回傳\n"
         "- guide 列出 3~5 條具體攻略建議\n"
         f"- 如果{no_text_cond}，translations 為空列表\n"
         "只回傳 JSON，不要有其他文字。"
@@ -1290,15 +1347,53 @@ def build_combined_prompt(rom_name: str, region: str, src_lang: str, tgt_lang: s
 # ==========================================
 # 五引擎 API 呼叫
 # ==========================================
-def _img_to_jpeg_b64(image_pil):
+def _get_display_width(orig_w: int) -> int:
+    if orig_w <= IMG_SMALL_THRESHOLD:
+        return DISPLAY_WIDTH_SMALL
+    elif orig_w <= 700:
+        return DISPLAY_WIDTH_MEDIUM_PX1
+    elif orig_w <= IMG_MEDIUM_THRESHOLD:
+        return DISPLAY_WIDTH_MEDIUM_PX2
+    else:
+        return DISPLAY_WIDTH_LARGE
+
+
+def _prepare_img_for_engine(image_pil, engine_type: str = "cloud"):
+    orig_w = image_pil.width
+    if engine_type == "ollama":
+        if orig_w <= IMG_SMALL_THRESHOLD:
+            max_w, quality = IMG_OLLAMA_SMALL
+        elif orig_w <= IMG_MEDIUM_THRESHOLD:
+            max_w, quality = IMG_OLLAMA_MEDIUM
+        else:
+            max_w, quality = IMG_OLLAMA_LARGE
+    else:
+        if orig_w <= IMG_SMALL_THRESHOLD:
+            max_w, quality = IMG_CLOUD_SMALL
+        elif orig_w <= IMG_MEDIUM_THRESHOLD:
+            max_w, quality = IMG_CLOUD_MEDIUM
+        else:
+            max_w, quality = IMG_CLOUD_LARGE
+
+    if max_w and orig_w > max_w:
+        scale = max_w / orig_w
+        new_h = int(image_pil.height * scale)
+        image_pil = image_pil.resize((max_w, new_h), Image.LANCZOS)
+        log(f"[IMG] {engine_type} 縮圖: {orig_w}px → {max_w}px, quality={quality}")
+    else:
+        log(f"[IMG] {engine_type} 不縮圖: {orig_w}px, quality={quality}")
+    return image_pil, quality
+
+
+def _img_to_jpeg_b64(image_pil, quality: int = 75):
     buf = io.BytesIO()
-    image_pil.save(buf, format="JPEG", quality=75)
+    image_pil.save(buf, format="JPEG", quality=quality)
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-def _img_to_jpeg_bytes(image_pil):
+def _img_to_jpeg_bytes(image_pil, quality: int = 75):
     buf = io.BytesIO()
-    image_pil.save(buf, format="JPEG", quality=75)
+    image_pil.save(buf, format="JPEG", quality=quality)
     return buf.getvalue()
 
 
@@ -1414,7 +1509,8 @@ def call_gemini(api_key, model, image_pil, prompt):
     """Gemini API (google-genai SDK)"""
     from google.genai import types
     client = _get_client("gemini", api_key)
-    img_bytes = _img_to_jpeg_bytes(image_pil)
+    image_pil, quality = _prepare_img_for_engine(image_pil, "cloud")
+    img_bytes = _img_to_jpeg_bytes(image_pil, quality)
     response = client.models.generate_content(
         model=model,
         contents=[
@@ -1428,7 +1524,8 @@ def call_gemini(api_key, model, image_pil, prompt):
 def call_groq(api_key, model, image_pil, prompt):
     """Groq API (groq SDK — OpenAI 相容 chat.completions + vision)"""
     client = _get_client("groq", api_key)
-    img_b64 = _img_to_jpeg_b64(image_pil)
+    image_pil, quality = _prepare_img_for_engine(image_pil, "cloud")
+    img_b64 = _img_to_jpeg_b64(image_pil, quality)
     chat_completion = client.chat.completions.create(
         model=model,
         messages=[
@@ -1451,7 +1548,8 @@ def call_groq(api_key, model, image_pil, prompt):
 def call_mistral(api_key, model, image_pil, prompt):
     """Mistral API (mistralai SDK — chat.complete + vision)"""
     client = _get_client("mistral", api_key)
-    img_b64 = _img_to_jpeg_b64(image_pil)
+    image_pil, quality = _prepare_img_for_engine(image_pil, "cloud")
+    img_b64 = _img_to_jpeg_b64(image_pil, quality)
     chat_response = client.chat.complete(
         model=model,
         messages=[
@@ -1471,7 +1569,8 @@ def call_mistral(api_key, model, image_pil, prompt):
 def call_openai(api_key, model, image_pil, prompt):
     """OpenAI Responses API (openai SDK)"""
     client = _get_client("openai", api_key)
-    img_b64 = _img_to_jpeg_b64(image_pil)
+    image_pil, quality = _prepare_img_for_engine(image_pil, "cloud")
+    img_b64 = _img_to_jpeg_b64(image_pil, quality)
     response = client.responses.create(
         model=model,
         input=[
@@ -1490,7 +1589,8 @@ def call_openai(api_key, model, image_pil, prompt):
 def call_claude(api_key, model, image_pil, prompt):
     """Claude Messages API (anthropic SDK)"""
     client = _get_client("claude", api_key)
-    img_b64 = _img_to_jpeg_b64(image_pil)
+    image_pil, quality = _prepare_img_for_engine(image_pil, "cloud")
+    img_b64 = _img_to_jpeg_b64(image_pil, quality)
     message = client.messages.create(
         model=model,
         max_tokens=2048,
@@ -1510,7 +1610,8 @@ def call_claude(api_key, model, image_pil, prompt):
 def call_grok(api_key, model, image_pil, prompt):
     """Grok / xAI API（OpenAI-compatible，endpoint: api.x.ai）"""
     client = _get_client("grok", api_key)
-    img_b64 = _img_to_jpeg_b64(image_pil)
+    image_pil, quality = _prepare_img_for_engine(image_pil, "cloud")
+    img_b64 = _img_to_jpeg_b64(image_pil, quality)
     response = client.chat.completions.create(
         model=model,
         messages=[
@@ -1536,12 +1637,20 @@ ENGINE_CALLERS = {
     "grok": call_grok,
 }
 
+
 # ==========================================
 # OLLAMA 本地引擎
 # ==========================================
 OLLAMA_BASE_URL = "http://localhost:11434"
 
 GOOGLE_TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single"
+OVERLAY_FONT_SIZE_MIN     = 10
+OVERLAY_FONT_SIZE_MAX     = 36
+OVERLAY_FONT_SIZE_DEFAULT = 22
+OVERLAY_FONT_SIZE_MAX_DEFAULT = 22   # 自動縮放最大字級
+OVERLAY_FONT_SIZE_MIN_CLAMP   = 10   # 自動縮放最小下限
+QUOTA_ESTIMATED_DEFAULT = 50         # 未知配額模型首次翻譯成功後套用的保守預設值
+
 OCR_CONF_THRESHOLD = 0.1      # EasyOCR 最低信心值
 OCR_MAX_WIDTH = 1280          # 送入 EasyOCR 前限制最大寬度（px）
 OCR_TRANSLATE_WORKERS = 8     # Google 翻譯並行執行緒數
@@ -1661,7 +1770,8 @@ def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOU
     以獨立執行緒發送請求，主執行緒等待 timeout 秒；逾時則拋出 TimeoutError。
     """
 
-    img_b64 = _img_to_jpeg_b64(image_pil)
+    image_pil, quality = _prepare_img_for_engine(image_pil, "ollama")
+    img_b64 = _img_to_jpeg_b64(image_pil, quality)
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt, "images": [img_b64]}],
@@ -2067,10 +2177,136 @@ class _Tooltip:
             self._win = None
 
 
+def _calc_font_size(item_count: int) -> int:
+    fs_max = OVERLAY_FONT_SIZE_MAX_DEFAULT
+    if item_count <= 3:
+        size = fs_max
+    elif item_count <= 8:
+        ratio = 1.0 - (item_count - 3) / 5 * 0.3
+        size = int(fs_max * ratio)
+    else:
+        ratio = 0.7 - (item_count - 8) / 10 * 0.2
+        ratio = max(ratio, OVERLAY_FONT_SIZE_MIN_CLAMP / fs_max)
+        size = int(fs_max * ratio)
+    return max(size, OVERLAY_FONT_SIZE_MIN_CLAMP)
+
+
+def _fetch_models_from_api(eng: str, api_key: str) -> list:
+    try:
+        if eng == "gemini":
+            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read().decode())
+            # 排除非視覺模型：embedding、tts、imagen、veo、music、aqa、text-bison 等純文字
+            skip = {"embedding", "tts", "imagen", "veo", "music", "aqa", "text-", "chat-"}
+            result = []
+            for m in data.get("models", []):
+                name = m.get("name", "")
+                if "gemini" not in name:
+                    continue
+                if any(s in name for s in skip):
+                    continue
+                if "generateContent" not in m.get("supportedGenerationMethods", []):
+                    continue
+                # 僅保留已知支援視覺的系列
+                model_id = name.replace("models/", "")
+                vlm_series = {"gemini-1.5", "gemini-2", "gemini-3", "gemini-pro-vision", "gemini-ultra"}
+                if not any(s in model_id for s in vlm_series):
+                    continue
+                result.append(model_id)
+            return sorted(result)
+
+        elif eng == "openai":
+            req = urllib.request.Request(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read().decode())
+            # VLM 名稱關鍵字：gpt-4o 系列、gpt-4-turbo（含 vision）、o1/o3/o4 旗艦推理模型
+            vlm_include = {"gpt-4o", "gpt-4-turbo", "gpt-4-vision", "o1", "o3", "o4"}
+            exclude = {"instruct", "embedding", "tts", "whisper", "dall-e", "audio", "realtime"}
+            result = []
+            for m in data.get("data", []):
+                mid = m.get("id", "")
+                if not any(k in mid for k in vlm_include):
+                    continue
+                if any(k in mid for k in exclude):
+                    continue
+                result.append(mid)
+            return sorted(result)
+
+        elif eng == "groq":
+            req = urllib.request.Request(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read().decode())
+            # VLM 名稱關鍵字：llava、vision、-vl、scout（llama4 vision）、maverick
+            vlm_keywords = {"llava", "vision", "-vl", "scout", "maverick", "llama-4", "minicpm", "qwen2-vl", "qwen2vl"}
+            exclude = {"whisper", "tts", "guard"}
+            result = []
+            for m in data.get("data", []):
+                mid = m.get("id", "")
+                if any(k in mid for k in exclude):
+                    continue
+                if m.get("context_window", 0) < 8000:
+                    continue
+                if not any(k in mid.lower() for k in vlm_keywords):
+                    continue
+                result.append(mid)
+            return sorted(result)
+
+        elif eng == "mistral":
+            req = urllib.request.Request(
+                "https://api.mistral.ai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read().decode())
+            result = []
+            for m in data.get("data", []):
+                caps = m.get("capabilities", {})
+                if caps.get("vision") is True:
+                    result.append(m.get("id", ""))
+            return sorted(result)
+
+        elif eng == "claude":
+            req = urllib.request.Request(
+                "https://api.anthropic.com/v1/models",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                }
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read().decode())
+            # claude-3 及以上全系列支援視覺；排除 claude-2、instant、legacy 純文字模型
+            exclude = {"instant", "claude-2", "claude-1"}
+            vlm_include = {"claude-3", "claude-sonnet", "claude-haiku", "claude-opus"}
+            result = []
+            for m in data.get("data", []):
+                mid = m.get("id", "")
+                if any(k in mid for k in exclude):
+                    continue
+                if any(k in mid for k in vlm_include):
+                    result.append(mid)
+            return sorted(result)
+
+        elif eng == "grok":
+            return list(ENGINE_MODELS.get("grok", []))
+
+    except Exception as e:
+        log(f"[_fetch_models_from_api] {eng}: {e}")
+    return []
+
+
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.0.1-beta.8")
+        self.root.title("LangForge  V1.1.0")
         _load_app_icon(self.root)
 
         global CURRENT_LANG
@@ -2691,6 +2927,7 @@ class LangForgeApp:
         self.quota_table.tag_configure("even", background="#ffffff")
         self.quota_table.tag_configure("current", background="#d0eaff", font=("Arial", 9, "bold"))
         self.quota_table.tag_configure("no_quota", foreground="#cc0000")
+        self.quota_table.tag_configure("unknown_quota", foreground="#cc7700")
         self.quota_table.tag_configure("sep", background="#e0e0e0")
         quota_sb = ttk.Scrollbar(quota_scroll_frame, orient="vertical", command=self.quota_table.yview)
         self.quota_table.configure(yscrollcommand=quota_sb.set)
@@ -2969,7 +3206,7 @@ class LangForgeApp:
         else:
             disp_x = main_w + 10
             disp_y = 0
-        self.display.geometry(f"{TARGET_DISPLAY_WIDTH}x{DISPLAY_INIT_HEIGHT}+{disp_x}+{disp_y}")
+        self.display.geometry(f"{DISPLAY_WIDTH_SMALL}x{DISPLAY_INIT_HEIGHT}+{disp_x}+{disp_y}")
 
         # 導覽列（底部，半透明黑底）
         nav_bar = tk.Frame(self.display, bg="#222222")
@@ -3022,8 +3259,8 @@ class LangForgeApp:
         _load_app_icon(self.guide_display)
         self.guide_display.attributes("-topmost", True)
         self.guide_display.configure(bg="#1a1a2e")
-        guide_x = disp_x + TARGET_DISPLAY_WIDTH + 10
-        self.guide_display.geometry(f"{TARGET_DISPLAY_WIDTH}x{DISPLAY_INIT_HEIGHT}+{guide_x}+{disp_y}")
+        guide_x = disp_x + DISPLAY_WIDTH_SMALL + 10
+        self.guide_display.geometry(f"{DISPLAY_WIDTH_SMALL}x{DISPLAY_INIT_HEIGHT}+{guide_x}+{disp_y}")
 
         # 攻略導覽列（底部）
         guide_nav_bar = tk.Frame(self.guide_display, bg="#2a2a4e")
@@ -3176,18 +3413,29 @@ class LangForgeApp:
                     continue
                 seen_iids.add(iid)
                 used = used_today.get(m, 0)
-                limit = MODEL_DAILY_LIMITS.get(m, 500)
+                limit = MODEL_DAILY_LIMITS.get(m, -1)
                 rpm = MODEL_RPM.get(m, "-")
-                limit_str = str(limit) if limit > 0 else no_quota
+                estimated_models = self.config.get("estimated_quota_models", [])
+                if limit == -1:
+                    limit_str = "?"
+                elif limit == 0:
+                    limit_str = no_quota
+                elif m in estimated_models:
+                    limit_str = S("quota_estimated").format(n=limit)
+                else:
+                    limit_str = str(limit)
                 rpm_str = str(rpm) if rpm != "-" else "-"
 
                 # 決定 tag
                 is_current = eng == cur_eng and m == cur_model
-                is_no_quota = limit <= 0
+                is_no_quota = limit == 0
+                is_unknown = limit == -1
                 if is_current:
                     tags = ("current",)
                 elif is_no_quota:
                     tags = ("no_quota",)
+                elif is_unknown:
+                    tags = ("unknown_quota",)
                 else:
                     tags = ("odd",) if row_idx % 2 == 0 else ("even",)
 
@@ -3243,6 +3491,7 @@ class LangForgeApp:
         self.quota_table.tag_configure("current", background=t["tag_current_bg"],
                                        foreground=t["fg"], font=("Arial", 9, "bold"))
         self.quota_table.tag_configure("no_quota", foreground=t["tag_no_quota"])
+        self.quota_table.tag_configure("unknown_quota", foreground="#cc7700")
         self.quota_table.tag_configure("sep",     background=t["tag_sep"])
 
     # ══════════════════════════════════════════
@@ -3493,7 +3742,7 @@ class LangForgeApp:
         scr_h = self.root.winfo_screenheight()
         saved_x = self.config.get("playback_x", 10)
         saved_y = self.config.get("playback_y", scr_h - 700)
-        self._playback_window.geometry(f"{PLAYBACK_DISPLAY_WIDTH}x600+{saved_x}+{saved_y}")
+        self._playback_window.geometry(f"{DISPLAY_WIDTH_SMALL}x600+{saved_x}+{saved_y}")
 
         def _on_move(e=None):
             self.config["playback_x"] = self._playback_window.winfo_x()
@@ -3554,7 +3803,7 @@ class LangForgeApp:
                 full_path = os.path.join(self.LOG_DIR, img_path)
                 image_pil = Image.open(full_path)
                 orig_w, orig_h = image_pil.size
-                pb_w = PLAYBACK_DISPLAY_WIDTH_LARGE if orig_w > 1800 else PLAYBACK_DISPLAY_WIDTH
+                pb_w = _get_display_width(orig_w)
                 scale = pb_w / orig_w
                 pb_h = int(orig_h * scale)
                 image_pil = image_pil.resize((pb_w, pb_h), Image.LANCZOS)
@@ -3760,7 +4009,7 @@ class LangForgeApp:
         scr_h = self.root.winfo_screenheight()
         saved_x = self.config.get("playback_x", 10)
         saved_y = self.config.get("playback_y", scr_h - 700)
-        self._playback_window.geometry(f"{PLAYBACK_DISPLAY_WIDTH}x620+{saved_x}+{saved_y}")
+        self._playback_window.geometry(f"{DISPLAY_WIDTH_SMALL}x620+{saved_x}+{saved_y}")
 
         info_frame = tk.Frame(self._playback_window, bg="#1a1a1a")
         info_frame.pack(fill="x")
@@ -3839,7 +4088,6 @@ class LangForgeApp:
                 self._playback_job = None
 
     def _render_to_image(self, segments, image_pil, out_w, out_h):
-
         try:
             segments = _merge_segments([s for s in segments if isinstance(s, dict)], x_thresh=0.05, y_thresh=0.02)
             items = []
@@ -3854,7 +4102,7 @@ class LangForgeApp:
 
             items.sort(key=lambda t: t[2])
             tgt_lang_str = self.tgt_lang_var.get() if hasattr(self, "tgt_lang_var") else "Traditional Chinese(正體中文)"
-            font_size = 22
+            font_size = _calc_font_size(len(items))
             font = _get_font_for_lang(tgt_lang_str, font_size)
             if font is None:
 
@@ -4648,22 +4896,6 @@ class LangForgeApp:
             self._try_capture_hwnd = None  # 出錯時清除快取
             return None
 
-    def _refresh_model_list(self):
-        eng = self.engine_var.get()
-        built_in = list(ENGINE_MODELS.get(eng, []))
-        custom = self.config.get("custom_models", {}).get(eng, [])
-        all_models = built_in + [m for m in custom if m not in built_in]
-        self.model_combo["values"] = all_models
-        current = self.model_var.get()
-        if current not in all_models:
-            default = ENGINE_DEFAULT_MODEL.get(eng, all_models[0] if all_models else "")
-            self.model_var.set(default)
-        self._refresh_quota()
-        self._set_status(
-            S("status_model_list_updated").format(engine=ENGINE_DISPLAY.get(eng, eng), n=len(all_models)),
-            "green"
-        )
-
     def _clear_queue(self):
         cleared = 0
         while not _request_queue.empty():
@@ -5004,24 +5236,70 @@ class LangForgeApp:
                 new_key = self.api_entry.get()
                 old_key = self.config.get(eng, "")
                 if new_key != old_key:
-                    _invalidate_client(eng, old_key)  # Key 變更，清除舊 client 快取
+                    _invalidate_client(eng, old_key)
                 self.config[eng] = new_key
                 break
 
     def _refresh_model_list(self):
         eng = self.engine_var.get()
-        built_in = list(ENGINE_MODELS.get(eng, []))
-        custom_list = self.config.get("custom_models", {}).get(eng, [])
-        all_models = built_in + [m for m in custom_list if m not in built_in]
-        self.model_combo["values"] = all_models
-        current = self.model_var.get()
-        if current not in all_models:
-            self.model_var.set(ENGINE_DEFAULT_MODEL.get(eng, all_models[0] if all_models else ""))
-        self._refresh_quota()
-        self._set_status(
-            S("status_model_list_updated").format(engine=ENGINE_DISPLAY.get(eng, eng), n=len(all_models)),
-            "green"
-        )
+        api_key = self.api_entry.get().strip()
+
+        if api_key and eng != "grok":
+            self._set_status(S("status_fetching_models").format(engine=ENGINE_DISPLAY.get(eng, eng)), "orange")
+            self.root.update_idletasks()
+
+            def _do_fetch():
+                fetched = _fetch_models_from_api(eng, api_key)
+                self.root.after(0, lambda f=fetched: _apply_fetched(f))
+
+            def _apply_fetched(fetched):
+                if fetched:
+                    custom = self.config.get("custom_models", {}).get(eng, [])
+                    all_models = fetched + [m for m in custom if m not in fetched]
+                    cached = self.config.setdefault("cached_models", {})
+                    cached[eng] = fetched
+                    # 方案2：不在 MODEL_DAILY_LIMITS 且非學習到 limit=0 的新模型標記為 -1（未知）
+                    learned_zero = self.config.get("learned_zero_quota", [])
+                    custom_quota = self.config.get("custom_quota", {})
+                    unknown = []
+                    for m in fetched:
+                        if m in custom_quota:
+                            MODEL_DAILY_LIMITS[m] = custom_quota[m]
+                        elif m not in MODEL_DAILY_LIMITS and m not in learned_zero:
+                            MODEL_DAILY_LIMITS[m] = -1
+                            unknown.append(m)
+                    if unknown:
+                        log(f"[quota] 新模型配額未知（標記為 ?）: {unknown}")
+                    save_config(self.config)
+                else:
+                    built_in = list(ENGINE_MODELS.get(eng, []))
+                    custom = self.config.get("custom_models", {}).get(eng, [])
+                    all_models = built_in + [m for m in custom if m not in built_in]
+                    self._set_status(S("status_fetch_models_failed").format(engine=ENGINE_DISPLAY.get(eng, eng)), "red")
+                self.model_combo["values"] = all_models
+                current = self.model_var.get()
+                if current not in all_models:
+                    self.model_var.set(all_models[0] if all_models else "")
+                self._refresh_quota()
+                self._refresh_quota_table()
+                if fetched:
+                    self._set_status(S("status_model_list_updated").format(engine=ENGINE_DISPLAY.get(eng, eng), n=len(all_models)), "green")
+
+            threading.Thread(target=_do_fetch, daemon=True).start()
+
+        else:
+            cached = self.config.get("cached_models", {}).get(eng, [])
+            built_in = list(ENGINE_MODELS.get(eng, []))
+            base = cached if cached else built_in
+            custom = self.config.get("custom_models", {}).get(eng, [])
+            all_models = base + [m for m in custom if m not in base]
+            self.model_combo["values"] = all_models
+            current = self.model_var.get()
+            if current not in all_models:
+                self.model_var.set(ENGINE_DEFAULT_MODEL.get(eng, all_models[0] if all_models else ""))
+            self._refresh_quota()
+            self._refresh_quota_table()
+            self._set_status(S("status_model_list_updated").format(engine=ENGINE_DISPLAY.get(eng, eng), n=len(all_models)), "green")
 
     def _add_custom_model(self):
         model_name = self.custom_model_var.get().strip()
@@ -5067,9 +5345,11 @@ class LangForgeApp:
             self._set_status(S("status_no_model_remove"), "orange")
 
     def _get_engine_models(self, eng):
+        cached = self.config.get("cached_models", {}).get(eng, [])
         built_in = list(ENGINE_MODELS.get(eng, []))
+        base = cached if cached else built_in
         custom = list(self.config.get(f"custom_models_{eng}", []))
-        return built_in + custom
+        return base + [m for m in custom if m not in base]
 
     def _refresh_quota(self):
         global CURRENT_LANG
@@ -5079,11 +5359,13 @@ class LangForgeApp:
         used_today = self.config.get("used_today", {})
 
         used = used_today.get(model, 0)
-        limit = MODEL_DAILY_LIMITS.get(model, 500)
+        limit = MODEL_DAILY_LIMITS.get(model, -1)
         rpm = MODEL_RPM.get(model, 0)
 
-        if limit <= 0:
+        if limit == 0:
             self.quota_label.config(text=f"▶ {model}:  {S('quota_no_free')}", foreground="red")
+        elif limit == -1:
+            self.quota_label.config(text=f"▶ {model}:  {used}/? RPD  (配額未知)", foreground="#cc7700")
         else:
             rpm_str = f"RPM={rpm}" if rpm > 0 else ""
             color = "brown" if used < limit else "red"
@@ -5359,6 +5641,19 @@ class LangForgeApp:
             self.combo_guide_status.config(text=S("lbl_combo_off"), foreground="gray")
         self._update_indicators()
 
+    def _on_overlay_font_size_change(self, *args):
+        val = self.overlay_font_size_var.get()
+        self._fs_value_label.config(text=f"{val} px")
+        self.config["overlay_font_size"] = val
+        save_config(self.config)
+
+    def _on_auto_switch_skip_change(self):
+        self.config["auto_switch_skip_no_key"] = self.auto_switch_skip_no_key_var.get()
+        save_config(self.config)
+
+    # ══════════════════════════════════════════
+    # 自訂雲端引擎管理
+    # ══════════════════════════════════════════
     def _refresh_ollama_models(self):
         new_models = _detect_ollama_vision_models()
         self._ollama_models = new_models
@@ -5665,7 +5960,7 @@ class LangForgeApp:
     def _check_cooldown_and_quota(self):
         model = self.model_var.get()
         used = self.config["used_today"].get(model, 0)
-        limit = MODEL_DAILY_LIMITS.get(model, 500)
+        limit = MODEL_DAILY_LIMITS.get(model, -1)
 
         remaining = self._get_remaining_cooldown(model)
         if remaining > 0:
@@ -5675,13 +5970,14 @@ class LangForgeApp:
             return False
 
         # RPD 用完 → 自動切換下一個可用模型/引擎
-        if limit <= 0 or used >= limit:
+        # limit=-1 表示配額未知，讓實際 API 呼叫決定（不預先跳過）
+        if limit != -1 and (limit <= 0 or used >= limit):
             log(f"{model} 已無額度 ({used}/{limit})，嘗試自動切換...")
             if self._auto_switch_model():
                 # 切換成功，重新檢查新模型的冷卻
                 return self._check_cooldown_and_quota()
             else:
-                self._set_status(S("status_quota_exhausted"), "red")
+                self._set_status(S("status_quota_exhausted_hint"), "red")
                 return False
 
         LAST_REQUEST_TIME[model] = time.time()  # 記錄本次請求時間（用於冷卻計算）
@@ -5699,14 +5995,16 @@ class LangForgeApp:
         cur_eng_idx = ENGINE_ORDER.index(current_eng) if current_eng in ENGINE_ORDER else 0
         for offset in range(1, len(ENGINE_ORDER)):
             eng = ENGINE_ORDER[(cur_eng_idx + offset) % len(ENGINE_ORDER)]
-            if not self.config.get(eng, "").strip():
+            skip_no_key = True
+            if skip_no_key and not self.config.get(eng, "").strip():
                 continue
             for m in self._get_engine_models(eng):
                 search_order.append((eng, m))
         for eng, model in search_order:
             used = self.config["used_today"].get(model, 0)
-            limit = MODEL_DAILY_LIMITS.get(model, 500)
-            if limit > 0 and used < limit:
+            limit = MODEL_DAILY_LIMITS.get(model, -1)
+            # limit=-1 未知配額視為可用（實際呼叫才知道）；limit=0 跳過；其他檢查使用量
+            if limit == -1 or (limit > 0 and used < limit):
                 log(f"自動切換: {ENGINE_DISPLAY[eng]} / {model} ({used}/{limit})")
                 if eng != current_eng:
                     self._save_current_key_to_config()
@@ -5718,9 +6016,13 @@ class LangForgeApp:
                 self.model_var.set(model)
                 self._refresh_quota()
                 self._update_cooldown_display()
-                self._set_status(S("status_auto_switched").format(model=model), "blue")
+                self._set_status(
+                    S("status_auto_switched").format(engine=ENGINE_DISPLAY.get(eng, eng), model=model),
+                    "blue"
+                )
                 return True
         log("所有引擎/模型的每日額度皆已用完")
+        self._set_status(S("status_quota_exhausted_hint"), "red")
         return False
 
     def _start_cooldown_timer(self):
@@ -6389,8 +6691,38 @@ class LangForgeApp:
             elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                 if self._is_quota_zero(err_str):
                     MODEL_DAILY_LIMITS[model] = 0
-                    self._set_status(S("quota_switch").format(model=model), "red")
+                    learned = self.config.setdefault("learned_zero_quota", [])
+                    if model not in learned:
+                        learned.append(model)
+                        save_config(self.config)
+                    log(f"[quota] 學習到 {model} limit=0，已記錄，嘗試自動切換...")
                     self.root.after(0, self._refresh_quota)
+                    self.root.after(0, self._refresh_quota_table)
+                    if self._auto_switch_model():
+                        log(f"[quota] limit=0 觸發自動切換成功，重新送出翻譯請求...")
+                        # 用新引擎/模型的快照重新加入佇列
+                        new_snap = {
+                            "snap_src_lang":      task.get("snap_src_lang", src_lang),
+                            "snap_tgt_lang":      task.get("snap_tgt_lang", tgt_lang),
+                            "snap_engine_mode":   engine_mode,
+                            "snap_engine":        self.engine_var.get(),
+                            "snap_model":         self.model_var.get(),
+                            "snap_api_key":       self.api_entry.get().strip(),
+                            "snap_ollama_model":  task.get("snap_ollama_model", ""),
+                            "snap_ollama_timeout": task.get("snap_ollama_timeout", str(OLLAMA_TIMEOUT)),
+                            "snap_target_window": target_win,
+                            "snap_platform":      platform,
+                        }
+                        retry_task = {"type": "translate", "image_pil": image_pil,
+                                      "source": source, "win_title": win_title}
+                        retry_task.update(new_snap)
+                        try:
+                            _request_queue.put_nowait(retry_task)
+                            log(f"[quota] 重試任務已加入佇列")
+                        except Exception:
+                            self._set_status(S("status_quota_exhausted_hint"), "red")
+                    else:
+                        self._set_status(S("quota_switch").format(model=model), "red")
                 else:
                     retry_sec = self._parse_429_retry_delay(err_str)
                     if retry_sec:
@@ -6421,6 +6753,21 @@ class LangForgeApp:
             self.last_res = res
             self.config["used_today"][model] = self.config["used_today"].get(model, 0) + 1
             self.config[eng] = api_key
+            # 非內建模型：翻譯成功表示此模型可用，持久化配額資訊
+            built_in_models = [m for models in ENGINE_MODELS.values() for m in models]
+            if model not in built_in_models:
+                cur_limit = MODEL_DAILY_LIMITS.get(model, -1)
+                if cur_limit == -1:
+                    # 成功代表有額度，用保守預設值標記為「已確認可用」
+                    MODEL_DAILY_LIMITS[model] = QUOTA_ESTIMATED_DEFAULT
+                    self.config.setdefault("custom_quota", {})[model] = QUOTA_ESTIMATED_DEFAULT
+                    # 記錄哪些模型是保守估算，供 Tab3 顯示區別
+                    estimated = self.config.setdefault("estimated_quota_models", [])
+                    if model not in estimated:
+                        estimated.append(model)
+                    log(f"[quota] {model} 翻譯成功，配額標記為保守額度 {QUOTA_ESTIMATED_DEFAULT} RPD")
+                else:
+                    self.config.setdefault("custom_quota", {})[model] = cur_limit
             self._safe_save_config()
             self.root.after(0, self._refresh_quota)
             self._set_status(S("status_done"), "green")
@@ -6653,7 +7000,7 @@ class LangForgeApp:
                 img = Image.open(ss_path).convert("RGB")
             else:
                 # 無截圖：建立黑底佔位
-                img = Image.new("RGB", (TARGET_DISPLAY_WIDTH, DISPLAY_INIT_HEIGHT), (0, 0, 0))
+                img = Image.new("RGB", (DISPLAY_WIDTH_SMALL, DISPLAY_INIT_HEIGHT), (0, 0, 0))
             self._nav_index = index
             self._nav_update_bar()
             self.render(segments, img, source="history")
@@ -6719,9 +7066,9 @@ class LangForgeApp:
                 try:
                     img = Image.open(ss_path).convert("RGB")
                 except Exception:
-                    img = Image.new("RGB", (TARGET_DISPLAY_WIDTH, DISPLAY_INIT_HEIGHT), (26, 26, 46))
+                    img = Image.new("RGB", (DISPLAY_WIDTH_SMALL, DISPLAY_INIT_HEIGHT), (26, 26, 46))
             else:
-                img = Image.new("RGB", (TARGET_DISPLAY_WIDTH, DISPLAY_INIT_HEIGHT), (26, 26, 46))
+                img = Image.new("RGB", (DISPLAY_WIDTH_SMALL, DISPLAY_INIT_HEIGHT), (26, 26, 46))
             self._guide_nav_index = index
             self._guide_nav_update_bar()
             self._render_guide(progress, guide_list, img)
@@ -6745,7 +7092,7 @@ class LangForgeApp:
 
         # 依原圖寬度決定目標顯示寬度
         _src_w = image_pil.width
-        _target_w = DISPLAY_WIDTH_LARGE if _src_w > WIDE_SOURCE_THRESHOLD else TARGET_DISPLAY_WIDTH
+        _target_w = _get_display_width(_src_w)
 
         if source == "file":
             orig_w, orig_h = image_pil.width, image_pil.height
@@ -6840,9 +7187,13 @@ class LangForgeApp:
                     sx = sx / orig_w
                 sx = max(0.02, min(0.98, sx))
 
-                # Y 軸：像素 → 除以原圖高，超出範圍夾邊
+                # Y 軸：像素 → 若最大值超出原圖高，代表模型用了更大座標系（如螢幕高度）
+                # 用 max_sy 做歸一化以保留組內相對位置；否則用 orig_h
                 if group_is_px_y:
-                    sy = sy / orig_h
+                    if max_sy > orig_h:
+                        sy = sy / max_sy
+                    else:
+                        sy = sy / orig_h
                 sy = max(0.02, min(0.98, sy))
 
                 items.append((tw, sx, sy))
@@ -6857,10 +7208,30 @@ class LangForgeApp:
 
         items.sort(key=lambda t: t[2])  # 依 sy 升序：y 小的（選單）先於 y 大的（對話框）
 
-        # ── 自動調整字級 ──
+        # ── 角色名稱 y 座標修正：若短文字無標點且 y 比下一段小很多，貼近下一段上方 ──
+        if len(items) >= 2:
+            _punct = set("，。！？、：；…""''「」『』【】〔〕《》〈〉·～─—,.!?:;\"'()[]{}·~-")
+            _corrected = list(items)
+            for i in range(len(_corrected) - 1):
+                tw_i, sx_i, sy_i = _corrected[i]
+                tw_next, sx_next, sy_next = _corrected[i + 1]
+                is_short = len(tw_i.replace(" ", "")) <= 10
+                has_no_punct = not any(c in _punct for c in tw_i)
+                y_gap = sy_next - sy_i
+                # y 差距 > 0.15 且判斷為角色名稱
+                # 排除：當前 y 在上半部（<0.4）且下一段在下半部（>0.5），兩者跨越畫面中線，屬於不同區域不修正
+                crosses_midline = sy_i < 0.4 and sy_next > 0.5
+                if is_short and has_no_punct and y_gap > 0.15 and not crosses_midline:
+                    # 將角色名稱 y 調整到下一段 y 減去一個估算行高（字級/out_h）
+                    approx_line_h = OVERLAY_FONT_SIZE_MAX_DEFAULT / out_h
+                    new_sy = max(0.02, sy_next - approx_line_h * 1.5)
+                    if DEBUG_COORD:
+                        log(f"[COORD] 角色名稱 y 修正: {tw_i!r} {sy_i:.3f}→{new_sy:.3f} (next_y={sy_next:.3f})")
+                    _corrected[i] = (tw_i, sx_i, new_sy)
+            items = _corrected
         tgt_lang = getattr(self, "tgt_lang_var", None)
         tgt_lang_str = tgt_lang.get() if tgt_lang else "Traditional Chinese(正體中文)"
-        font_size = 22
+        font_size = OVERLAY_FONT_SIZE_MAX_DEFAULT
         min_font_size = 9  # 方向A：允許縮小至 9px 作為疊字輔助
 
         while font_size >= min_font_size:
