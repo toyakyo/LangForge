@@ -26,6 +26,13 @@ from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageGrab, ImageChops
 import win32gui
 
+try:
+    import mistralai
+    from mistralai import Mistral
+except Exception as e:
+    print(f"DEBUG: Mistral load error: {e}")
+    Mistral = None
+
 # ==========================================
 # 三層環境自動偵測
 # ==========================================
@@ -1482,9 +1489,16 @@ def _get_client(engine: str, api_key: str):
     elif engine == "groq":
         from groq import Groq
         client = Groq(api_key=api_key)
+    
     elif engine == "mistral":
-        from mistralai import Mistral
-        client = Mistral(api_key=api_key)
+        try:
+         from mistralai import Mistral
+         client = Mistral(api_key=api_key)
+        except ImportError:
+         raise ImportError(
+            "mistralai Package failed to load correctly \n RUN: pip install mistralai\n"
+        )
+
     elif engine == "openai":
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
