@@ -1,160 +1,82 @@
-# LangForge - 遊戲截圖翻譯工具
+# LangForge
 
-AI 驅動的遊戲截圖即時翻譯工具
+專為遊戲玩家設計的 AI 即時截圖翻譯工具，支援主流雲端引擎與本地離線模式。
 
-## 功能特性
+> 📖 [English README](README.md)
 
-✨ **多引擎支援**
-- Google Gemini
-- Groq
-- Mistral AI
-- OpenAI
-- Anthropic Claude
-- 本地 OLLAMA
-- Google 免費翻譯
+## 主要功能
 
-🎮 **遊戲專用**
-- 實時遊戲截圖翻譯
-- 攻略資訊快速查詢
-- 多平台支援（NES, SNES, N64, PS1, Dreamcast, RetroArch 等）
-- 模擬器自動檢測
+- 🎮 遊戲截圖 AI 翻譯，結果以疊圖方式顯示於原畫面
+- 🌐 支援主流雲端引擎：Gemini、Groq、Mistral、OpenAI、Claude、Grok
+- 🦙 本地 OLLAMA 引擎（完全離線，無需 API Key）
+- 🔍 本地 OCR 模式（EasyOCR + Google 翻譯，完全免費）
+- 💾 歷史翻譯紀錄與場次錄製回放功能
+- 🗺️ AI 攻略分析（遊玩中同步取得攻略建議）
+- ⚡ 自動擷取翻譯（畫面穩定偵測，無需手動操作）
+- 🎨 雙語介面（繁體中文 / English）
+- 🌗 深色 / 淺色主題切換
+- 🕹️ 平台編輯器（直接在程式內管理遊戲平台與模擬器清單）
 
-📝 **完整記錄**
-- 翻譯歷史管理
-- 攻略資訊保存
-- 場次錄製功能
-- 快捷鍵支援
+## 安裝方式
 
-⚙️ **高度可定制**
-- 多語言介面（中文/英文）
-- 自動翻譯設定
-- 引擎切換
-- API Key 管理
+### 方式一：下載執行檔（推薦）
 
-## 安裝
+1. 從 [GitHub Releases](https://github.com/toyakyo/LangForge/releases) 下載 `LangForge_V1.1.1.zip`
+2. 解壓縮後直接執行 `LangForge.exe`（無需安裝 Python）
+3. 建議執行前驗證 SHA256：
+   ```
+   1E9DF0E89E91E9D799E56049E7F5FBA5D08C36E6706F4140F38E38413697FE80
+   ```
+   ```powershell
+   Get-FileHash .\LangForge.exe -Algorithm SHA256
+   ```
 
-### 快速開始
+### 方式二：從原始碼執行
 
-1. 複製或下載本項目
 ```bash
 git clone https://github.com/toyakyo/LangForge.git
 cd LangForge
-```
-
-2. 安裝依賴
-```bash
 pip install -r requirements.txt
-```
-
-3. 運行應用
-```bash
 python main.py
 ```
 
-### 打包成可執行文件
+## 支援引擎
 
-```bash
-pip install pyinstaller
-pyinstaller build_spec.py
-```
-
-生成的 .exe 檔案位於 `dist/LangForge/LangForge.exe`
-
-## 使用指南
-
-### 基本使用
-
-1. 啟動應用後，在「翻譯操作」分頁設定：
-   - 翻譯引擎（推薦 Gemini）
-   - 遊戲語言（源語言）
-   - 譯文語言（目標語言）
-
-2. 在「擷取設定」分頁配置：
-   - 目標遊戲視窗
-   - 快捷鍵
-   - 自動翻譯設定
-
-3. 執行翻譯：
-   - 使用快捷鍵或點擊「視窗擷取翻譯」按鈕
-   - 翻譯結果會即時顯示
-
-### API Key 設定
-
-在「設定」分頁中設定各個翻譯引擎的 API Key：
-
-- **Gemini**: https://makersuite.google.com/app/apikey
-- **OpenAI**: https://platform.openai.com/api-keys
-- **Claude**: https://console.anthropic.com/
-- **Groq**: https://console.groq.com/
-- **Mistral**: https://console.mistral.ai/
-
-## 項目結構
-
-詳見 [STRUCTURE.md](STRUCTURE.md)
-
-```
-LangForge/
-├── langforge/
-│   ├── config/          # 配置檔案
-│   ├── core/            # 主程式
-│   ├── asset/           # 資源檔案
-│   └── translation_logs/ # 翻譯日誌
-├── main.py              # 執行入口
-├── build_spec.py        # 打包配置
-└── README.md            # 本檔案
-```
-
-## 版本資訊
-
-**當前版本**: V1.0.1-beta.5
-
-**功能完整度**: 完全功能版本
+| 引擎 | 免費額度 | 備註 |
+|------|----------|------|
+| Gemini（Google） | ✅ 500 RPD | 新手推薦，無需信用卡 |
+| Groq | ✅ 1000 RPD | 回應速度最快 |
+| Mistral | ✅ 500 RPD | 支援視覺輸入 |
+| OpenAI | 💳 付費 | 翻譯品質穩定 |
+| Claude（Anthropic） | 💳 付費 | 語意理解強 |
+| Grok（xAI） | 💳 付費 | 旗艦多模態模型 |
+| 🦙 OLLAMA | ✅ 完全免費 | 離線使用，無需 API Key |
+| 🔍 本地 OCR | ✅ 完全免費 | EasyOCR + Google 翻譯 |
 
 ## 系統需求
 
-- Python 3.8+
-- Windows 10+ (推薦)
-- 4GB RAM 以上
-- 網路連接（用於 API 調用）
+- Windows 10 / 11（64-bit 建議）
+- 使用雲端引擎時需網路連線；OLLAMA 與 OCR 模式可離線使用
+- 使用雲端引擎需至少一組 API Key
 
-## 故障排除
+## 使用方式
 
-### 應用無法啟動
-1. 確認 Python 版本 ≥ 3.8
-2. 確認依賴已安裝：`pip install -r requirements.txt`
-3. 檢查 langforge/core/langforge.py 是否存在
+1. 執行 `LangForge.exe`
+2. 在「翻譯操作」頁籤輸入 API Key
+3. 在「擷取設定」頁籤設定目標遊戲視窗標題
+4. 點擊「視窗擷取翻譯」或使用快捷鍵（`Ctrl+F2`）
+5. 翻譯結果以疊圖方式顯示於截圖上
 
-### API Key 不生效
-1. 確認 API Key 已正確複製粘貼
-2. 確認 API Key 未過期
-3. 確認已啟用相應的 API 服務
+## 完整教學
 
-### 翻譯結果不準確
-1. 確認源語言設定正確
-2. 嘗試其他翻譯引擎
-3. 檢查遊戲截圖品質
+https://goonsoft.tw2.nde.tw/tutorial/tutorial.php
 
-## 貢獻
-
-歡迎提交 Issue 和 Pull Request！
-
-## 許可證
+## 授權
 
 Copyright © 2026 GoOnSoft. All rights reserved.
 
-## 作者
+## 支持開發
 
-**Toya Kyo**
-
-GitHub: https://github.com/toyakyo
-
-## 相關資源
-
-- GitHub: https://github.com/toyakyo/LangForge
-- Tutorial: https://goonsoft.tw2.nde.tw/tutorial/tutorial.php
-- Patreon: https://www.patreon.com/cw/LangForge
-- Ko-fi: https://ko-fi.com/toyakyo
-
----
-
-**感謝使用 LangForge！**
+- ☕ Ko-fi：https://ko-fi.com/toyakyo
+- 💜 Patreon：https://www.patreon.com/cw/LangForge
+- 💬 Facebook 社群：https://www.facebook.com/groups/2150940378645437

@@ -1,30 +1,29 @@
-# LangForge 依賴列表
+# LangForge V1.1.1 依賴列表
+# 一鍵安裝指令：
+# pip install anthropic easyocr google-genai groq keyboard mistralai numpy openai pillow pywin32
 
-# GUI
-tkinter>=0.0.0
+# ── GUI ──
+# tkinter 為 Python 標準庫，無需額外安裝
 
-# 圖像處理
+# ── 圖像處理 ──
 pillow>=10.0.0
 
-# API 和網絡
-requests>=2.31.0
-
-# AI 引擎
-google-generativeai>=0.3.0
+# ── AI 引擎（雲端）──
+google-genai>=0.8.0
 anthropic>=0.20.0
 groq>=0.7.0
 mistralai>=0.0.15
+openai>=1.0.0
 
-# 本地 OCR
+# ── 本地 OCR 模式（選用）──
 easyocr>=1.7.0
-
-# 數據處理
 numpy>=1.24.0
-python-dateutil>=2.8.0
-pydantic>=2.0.0
 
-# 系統相關
+# ── 快捷鍵支援 ──
+keyboard>=0.13.5
+
+# ── 系統相關 ──
 pywin32>=305; sys_platform == 'win32'
 
-# 打包（可選）
+# ── 打包（選用）──
 pyinstaller>=6.0.0
