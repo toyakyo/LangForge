@@ -1,4 +1,4 @@
-"""LangForge V1.1.0
+"""LangForge V1.1.1
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -25,13 +25,6 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageGrab, ImageChops
 import win32gui
-
-try:
-    import mistralai
-    from mistralai import Mistral
-except Exception as e:
-    print(f"DEBUG: Mistral load error: {e}")
-    Mistral = None
 
 # ==========================================
 # 三層環境自動偵測
@@ -176,7 +169,7 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.1.0"
+ABOUT_VERSION = "V1.1.1"
 DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
@@ -290,7 +283,7 @@ UI_STRINGS = {
         "btn_default_engine": "設為預設",
         "btn_ok": "確定",
         "lbl_diff_threshold": "差異門檻",
-        "rb_winmode_corner": "角落模式",
+        "rb_winmode_corner": "螢幕角落",
         "lbl_api_key": "Gemini API Key:",
         "lbl_model": "模型:",
         "btn_default_engine": "設為預設",
@@ -322,15 +315,21 @@ UI_STRINGS = {
         # ── Tab2 擷取設定 ──
         "lbl_target_win": "目標視窗標題:",
         "lbl_target_win_tooltip": "輸入視窗標題的部分文字即可匹配",
-        "btn_pick_window": "🖱 點選視窗",
+        "btn_pick_window":    "🖱 點選視窗",
+        "btn_cancel_pick":    "取消點選",
+        "btn_add_target":     "新增此標題",
+        "btn_remove_target":  "移除此標題",
+        "lbl_crop_top":       "截圖時裁切頂部(px):",
+        "lbl_crop_hint":      "(選單列高度，0=不裁切)",
         "lbl_pick_hint": "5秒內請點選目標視窗…",
         "lbl_crop_top": "裁切頂部(px):",
         "lbl_crop_hint": "（選單列高度，0=不裁切）",
         "lf_winmode": "視窗依附模式",
-        "rb_winmode_main": "依附主視窗",
-        "rb_winmode_mesen": "依附目標視窗",
-        "rb_winmode_corner": "螢幕角落（翻譯右上 / 攻略右下）",
-        "rb_winmode_sides": "目標視窗兩側（攻略左邊 / 翻譯右邊）",
+        "rb_winmode_main":   "主視窗",
+        "rb_winmode_mesen":  "遊戲視窗",
+        "rb_winmode_free":   "自由模式",
+        "rb_winmode_corner": "螢幕角落",
+        "rb_winmode_sides":  "遊戲視窗兩側",
         "lbl_hotkey": "擷取翻譯快捷鍵:",
         "btn_enable": "啟用",
         "btn_disable": "停用",
@@ -358,7 +357,10 @@ UI_STRINGS = {
         "th_id": "筆次",
         "th_time": "時間",
         "th_model": "模型",
-        "th_rom": "ROM名稱",
+        "th_rom": "遊戲名稱",
+        "dlg_rename_game":      "重新命名遊戲",
+        "lbl_rename_game_hint": "雙擊遊戲名稱可重新命名，將更新所有相關紀錄",
+        "btn_rename_game":      "套用改名",
         "th_window": "視窗",
         "th_platform": "平台",
         "lf_fix_platform": "修正平台",
@@ -437,8 +439,13 @@ UI_STRINGS = {
         "btn_open_playback": "開啟播放視窗",
         "session_idle": "未錄製",
         "session_recording": "錄製中...",
-        "th_session_game": "遊戲",
+        "th_session_game": "遊戲名稱",
         "th_session_start": "開始時間",
+        "th_session_end": "結束時間",
+        "th_session_dur": "影片長度",
+        "dur_fmt_hm": "{h}時{m}分",
+        "dur_fmt_m":  "{m}分",
+        "dur_fmt_s":  "{s}秒",
         "th_session_frames": "幀數",
         "th_session_plat": "平台",
         "btn_session_replay": "▶ 回放此場次",
@@ -451,6 +458,8 @@ UI_STRINGS = {
         # ── 硬編碼補全 ──
         "lf_actions": "功能",
         "lbl_hotkeys": "快捷鍵",
+        "lbl_hotkey_prompt": "請按下組合鍵...",
+        "lbl_hotkey_invalid": "無效組合，請重試",
         "lbl_ocr_desc": "本地 EasyOCR 辨識文字座標，Google 翻譯",
         "session_elapsed": "錄製中  {t}",
         "session_elapsed_h": "{h}時{m:02d}分{s:02d}秒",
@@ -481,6 +490,9 @@ UI_STRINGS = {
         "guide_parse_fail": "（解析失敗）",
         "status_queue_cleared": "已清空佇列（{n} 筆）",
         "status_queue_empty": "佇列已是空的",
+        "session_warn_no_window": "⚠ 找不到目標視窗，截圖暫停",
+        "session_warn_capture_fail": "⚠ 截圖失敗: {err}",
+        "session_warn_api_fail": "⚠ 翻譯失敗 (seq={seq}): {err}",
         "status_auto_switched": "自動切換至 {engine} / {model}",
         "status_quota_exhausted_hint": "所有引擎額度已用完，請明日再試或新增自訂引擎",
         "lf_overlay_settings": "疊字顯示設定",
@@ -622,9 +634,14 @@ UI_STRINGS = {
         "status_win_notfound": "Not found: {name}",
         "status_win_removed": "Removed: {name}",
         "th_session_frames": "Frames",
-        "th_session_game": "Game",
+        "th_session_game": "Game Name",
         "th_session_plat": "Platform",
         "th_session_start": "Started",
+        "th_session_end": "Ended",
+        "th_session_dur": "Duration",
+        "dur_fmt_hm": "{h}h{m}m",
+        "dur_fmt_m":  "{m}m",
+        "dur_fmt_s":  "{s}s",
         "btn_capture_trans": "Capture & Translate",
         "btn_default_engine": "Set as Default",
         "btn_ok": "OK",
@@ -661,15 +678,21 @@ UI_STRINGS = {
         # ── Tab2 ──
         "lbl_target_win": "Target Window Title:",
         "lbl_target_win_tooltip": "Enter partial window title to match",
-        "btn_pick_window": "🖱 Pick Window",
+        "btn_pick_window":    "🖱 Pick Window",
+        "btn_cancel_pick":    "Cancel Pick",
+        "btn_add_target":     "Add Title",
+        "btn_remove_target":  "Remove Title",
+        "lbl_crop_top":       "Crop Top (px):",
+        "lbl_crop_hint":      "(menu bar height, 0=none)",
         "lbl_pick_hint": "Click target window within 5s…",
         "lbl_crop_top": "Crop Top (px):",
         "lbl_crop_hint": "(menu bar height, 0=no crop)",
         "lf_winmode": "Window Attach Mode",
-        "rb_winmode_main": "Follow Main Window",
-        "rb_winmode_mesen": "Follow Target Window",
-        "rb_winmode_corner": "Screen Corner (Translate TR / Guide BR)",
-        "rb_winmode_sides": "Target Window Sides (Guide Left / Translate Right)",
+        "rb_winmode_main":   "Main Window",
+        "rb_winmode_mesen":  "Game Window",
+        "rb_winmode_free":   "Free Mode",
+        "rb_winmode_corner": "Screen Corner",
+        "rb_winmode_sides":  "Game Window Sides",
         "lbl_hotkey": "Capture Hotkey:",
         "btn_enable": "Enable",
         "btn_disable": "Disable",
@@ -697,7 +720,10 @@ UI_STRINGS = {
         "th_id": "#",
         "th_time": "Time",
         "th_model": "Model",
-        "th_rom": "ROM Name",
+        "th_rom": "Game Name",
+        "dlg_rename_game":      "Rename Game",
+        "lbl_rename_game_hint": "Double-click game name to rename (updates all related records)",
+        "btn_rename_game":      "Apply Rename",
         "th_window": "Window",
         "th_platform": "Platform",
         "lf_fix_platform": "Fix Platform",
@@ -775,7 +801,7 @@ UI_STRINGS = {
         "btn_open_playback": "Open Playback",
         "session_idle": "Idle",
         "session_recording": "Recording...",
-        "th_session_game": "Game",
+        "th_session_game": "Game Name",
         "th_session_start": "Started",
         "th_session_frames": "Frames",
         "th_session_plat": "Platform",
@@ -789,6 +815,8 @@ UI_STRINGS = {
         # ── hardcoded補全 ──
         "lf_actions": "Actions",
         "lbl_hotkeys": "Hotkeys",
+        "lbl_hotkey_prompt": "Press combo...",
+        "lbl_hotkey_invalid": "Invalid, retry",
         "lbl_ocr_desc": "Local EasyOCR detects text coords, Google Translate",
         "session_elapsed": "Recording  {t}",
         "session_elapsed_h": "{h}h {m:02d}m {s:02d}s",
@@ -819,6 +847,9 @@ UI_STRINGS = {
         "guide_parse_fail": "(parse failed)",
         "status_queue_cleared": "Queue cleared ({n} tasks)",
         "status_queue_empty": "Queue is already empty",
+        "session_warn_no_window": "⚠ Target window not found, capture paused",
+        "session_warn_capture_fail": "⚠ Capture failed: {err}",
+        "session_warn_api_fail": "⚠ Translation failed (seq={seq}): {err}",
         "status_auto_switched": "Auto-switched to {engine} / {model}",
         "status_quota_exhausted_hint": "All engine quotas exhausted. Try again tomorrow or add a custom engine.",
         "lf_overlay_settings": "Overlay Settings",
@@ -1240,6 +1271,10 @@ def load_config():
         data.setdefault("learned_zero_quota", [])
         data.setdefault("custom_quota", {})
         data.setdefault("estimated_quota_models", [])
+        data.setdefault("free_display_x", None)
+        data.setdefault("free_display_y", None)
+        data.setdefault("free_guide_x", None)
+        data.setdefault("free_guide_y", None)
         # 還原學習到的 limit=0 模型
         for _m in data.get("learned_zero_quota", []):
             MODEL_DAILY_LIMITS[_m] = 0
@@ -1489,16 +1524,9 @@ def _get_client(engine: str, api_key: str):
     elif engine == "groq":
         from groq import Groq
         client = Groq(api_key=api_key)
-    
     elif engine == "mistral":
-        try:
-         from mistralai import Mistral
-         client = Mistral(api_key=api_key)
-        except ImportError:
-         raise ImportError(
-            "mistralai Package failed to load correctly \n RUN: pip install mistralai\n"
-        )
-
+        from mistralai import Mistral
+        client = Mistral(api_key=api_key)
     elif engine == "openai":
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
@@ -2136,7 +2164,10 @@ def _apply_tk_widgets(widget, t: dict, skip: set = None):
                 insertbackground=t["fg"],
                 selectbackground=t["select_bg"], selectforeground=t["select_fg"])
         elif cls == "Label":
-            widget.configure(bg=t["label_bg"], fg=t["label_fg"])
+            if getattr(widget, "_lf_indicator", False):
+                widget.configure(bg=t["label_bg"])  # indicator：只改背景，fg 由 _update_indicators 控制
+            else:
+                widget.configure(bg=t["label_bg"], fg=t["label_fg"])
         elif cls in ("Frame", "Toplevel"):
             widget.configure(bg=t["bg"])
         elif cls == "Scale":
@@ -2145,6 +2176,16 @@ def _apply_tk_widgets(widget, t: dict, skip: set = None):
         pass
     for child in widget.winfo_children():
         _apply_tk_widgets(child, t, skip=skip)
+
+
+def _extract_pkg_name(err_str: str) -> str:
+    if "No module named" in err_str:
+        return err_str.replace("No module named ", "").strip("'").split()[0].split(".")[0]
+    if "cannot import name" in err_str:
+        m = re.search(r"from '([^']+)'", err_str)
+        if m:
+            return m.group(1).split(".")[0]
+    return err_str.split()[0]
 
 
 def _calc_dir_size_kb(dirpath: str) -> int:
@@ -2189,6 +2230,19 @@ class _Tooltip:
         if self._win:
             self._win.destroy()
             self._win = None
+
+
+def _fmt_duration(seconds: int) -> str:
+    if seconds <= 0:
+        return S("dur_fmt_m").format(m=0)
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    if h > 0:
+        return S("dur_fmt_hm").format(h=h, m=m)
+    elif m > 0:
+        return S("dur_fmt_m").format(m=m)
+    else:
+        return S("dur_fmt_s").format(s=seconds)
 
 
 def _calc_font_size(item_count: int) -> int:
@@ -2320,7 +2374,7 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.1.0")
+        self.root.title("LangForge  V1.1.1")
         _load_app_icon(self.root)
 
         global CURRENT_LANG
@@ -2470,14 +2524,17 @@ class LangForgeApp:
         self._ind_auto = tk.Label(
             indicator_frame, text=S("ind_auto"), font=("Arial", 8), fg="gray", bg="#f0f0f0", relief="flat", padx=3
         )
+        self._ind_auto._lf_indicator = True
         self._ind_auto.pack(side="left", padx=(0, 2))
         self._ind_combo = tk.Label(
             indicator_frame, text=S("ind_guide"), font=("Arial", 8), fg="gray", bg="#f0f0f0", relief="flat", padx=3
         )
+        self._ind_combo._lf_indicator = True
         self._ind_combo.pack(side="left", padx=(0, 2))
         self._ind_hotkey = tk.Label(
             indicator_frame, text=S("ind_hotkey"), font=("Arial", 8), fg="gray", bg="#f0f0f0", relief="flat", padx=3
         )
+        self._ind_hotkey._lf_indicator = True
         self._ind_hotkey.pack(side="left", padx=(0, 2))
         self._ind_guide_hotkey = tk.Label(
             indicator_frame,
@@ -2488,6 +2545,7 @@ class LangForgeApp:
             relief="flat",
             padx=3,
         )
+        self._ind_guide_hotkey._lf_indicator = True
         self._ind_guide_hotkey.pack(side="left")
         self._update_indicators()
 
@@ -2735,37 +2793,38 @@ class LangForgeApp:
         target_lf = ttk.LabelFrame(tab2, text=S("lbl_target_win").rstrip(":"))
         target_lf.pack(fill="x", pady=(0, 6), padx=2)
 
-        target_row = ttk.Frame(target_lf)
-        target_row.pack(fill="x", padx=6, pady=(6, 2))
+        # 第一排：標題下拉式清單
         saved_targets = self.config.get("target_windows", [])
         self.title_var = tk.StringVar(value=saved_targets[0] if saved_targets else "")
-        self.target_combo = ttk.Combobox(target_row, textvariable=self.title_var, width=30)
+        self.target_combo = ttk.Combobox(target_lf, textvariable=self.title_var, width=38)
         self.target_combo["values"] = saved_targets
         if not saved_targets:
             self.target_combo.set(S("hint_no_target"))
             self.target_combo.config(foreground="gray")
-        self.target_combo.pack(side="left")
+        self.target_combo.pack(anchor="w", padx=6, pady=(6, 2))
         self.target_combo.bind("<<ComboboxSelected>>", lambda e: self.target_combo.config(foreground=""))
         _Tooltip(self.target_combo, S("lbl_target_win_tooltip"))
-        ttk.Button(target_row, text=S("btn_add"), command=self._add_target_window, width=5).pack(side="left", padx=(4, 2))
-        ttk.Button(target_row, text=S("btn_remove"), command=self._remove_target_window, width=5).pack(side="left", padx=2)
 
-        pick_row = ttk.Frame(target_lf)
-        pick_row.pack(fill="x", padx=6, pady=(2, 2))
-        self.pick_window_btn = ttk.Button(pick_row, text=S("btn_pick_window"), command=self._start_pick_window, width=12)
-        self.pick_window_btn.pack(side="left")
-        self.pick_cancel_btn = ttk.Button(pick_row, text=S("btn_cancel"), command=self._cancel_pick_window, width=6, state="disabled")
-        self.pick_cancel_btn.pack(side="left", padx=(4, 0))
-        self.pick_hint_label = ttk.Label(pick_row, text="", foreground="orange", font=("Arial", 9))
-        self.pick_hint_label.pack(side="left", padx=(8, 0))
-        self._pick_countdown_id = None
-
+        # 第二排：截圖時裁切頂部
         crop_row = ttk.Frame(target_lf)
-        crop_row.pack(fill="x", padx=6, pady=(2, 6))
+        crop_row.pack(anchor="w", padx=6, pady=2)
         ttk.Label(crop_row, text=S("lbl_crop_top"), font=("Arial", 9)).pack(side="left")
         self.crop_top_var = tk.StringVar(value=str(self.config.get("crop_top", 0)))
         ttk.Entry(crop_row, textvariable=self.crop_top_var, width=5).pack(side="left", padx=3)
         ttk.Label(crop_row, text=S("lbl_crop_hint"), font=("Arial", 8), foreground="gray").pack(side="left")
+
+        # 第三排：新增、移除、點選視窗、取消點選
+        btn_row = ttk.Frame(target_lf)
+        btn_row.pack(anchor="w", padx=6, pady=(2, 6))
+        ttk.Button(btn_row, text=S("btn_add_target"),    command=self._add_target_window,    width=10).pack(side="left", padx=(0, 4))
+        ttk.Button(btn_row, text=S("btn_remove_target"), command=self._remove_target_window, width=10).pack(side="left", padx=(0, 8))
+        self.pick_window_btn  = ttk.Button(btn_row, text=S("btn_pick_window"),  command=self._start_pick_window,  width=12)
+        self.pick_window_btn.pack(side="left", padx=(0, 4))
+        self.pick_cancel_btn  = ttk.Button(btn_row, text=S("btn_cancel_pick"),  command=self._cancel_pick_window, width=10, state="disabled")
+        self.pick_cancel_btn.pack(side="left")
+        self.pick_hint_label  = ttk.Label(btn_row, text="", foreground="orange", font=("Arial", 9))
+        self.pick_hint_label.pack(side="left", padx=(8, 0))
+        self._pick_countdown_id = None
 
         # ── 3. 語言設定 ──
         lang_frame = ttk.LabelFrame(tab2, text=S("lf_lang"))
@@ -2833,6 +2892,7 @@ class LangForgeApp:
         wm_row1.pack(fill="x", padx=6, pady=(6, 2))
         ttk.Radiobutton(wm_row1, text=S("rb_winmode_main"),   variable=self.winmode_var, value="main",   command=self._on_winmode_change).pack(side="left", expand=True, fill="x")
         ttk.Radiobutton(wm_row1, text=S("rb_winmode_mesen"),  variable=self.winmode_var, value="mesen",  command=self._on_winmode_change).pack(side="left", expand=True, fill="x")
+        ttk.Radiobutton(wm_row1, text=S("rb_winmode_free"),   variable=self.winmode_var, value="free",   command=self._on_winmode_change).pack(side="left", expand=True, fill="x")
         wm_row2 = ttk.Frame(winmode_frame)
         wm_row2.pack(fill="x", padx=6, pady=(2, 6))
         ttk.Radiobutton(wm_row2, text=S("rb_winmode_corner"), variable=self.winmode_var, value="corner", command=self._on_winmode_change).pack(side="left", expand=True, fill="x")
@@ -2848,6 +2908,7 @@ class LangForgeApp:
         self.hotkey_var = tk.StringVar(value=self.config.get("hotkey", DEFAULT_HOTKEY))
         self.hotkey_entry = ttk.Entry(hk_row, textvariable=self.hotkey_var, width=14)
         self.hotkey_entry.pack(side="left", padx=4)
+        self._bind_hotkey_capture(self.hotkey_entry, self.hotkey_var, "hotkey")
         self.hotkey_btn = ttk.Button(hk_row, text=S("btn_enable"), command=self._toggle_hotkey, width=6)
         self.hotkey_btn.pack(side="left", padx=2)
         self.hotkey_active = False
@@ -2858,7 +2919,9 @@ class LangForgeApp:
         ghk_row.pack(fill="x", padx=6, pady=(2, 6))
         ttk.Label(ghk_row, text=S("lbl_guide_hotkey"), font=("Arial", 9), width=16).pack(side="left")
         self.guide_hotkey_var = tk.StringVar(value=self.config.get("guide_hotkey", "ctrl+f3"))
-        ttk.Entry(ghk_row, textvariable=self.guide_hotkey_var, width=14).pack(side="left", padx=4)
+        self.guide_hotkey_entry = ttk.Entry(ghk_row, textvariable=self.guide_hotkey_var, width=14)
+        self.guide_hotkey_entry.pack(side="left", padx=4)
+        self._bind_hotkey_capture(self.guide_hotkey_entry, self.guide_hotkey_var, "guide_hotkey")
         self.guide_hotkey_btn = ttk.Button(ghk_row, text=S("btn_enable"), command=self._toggle_guide_hotkey, width=6)
         self.guide_hotkey_btn.pack(side="left", padx=2)
         self.guide_hotkey_active = False
@@ -3002,6 +3065,8 @@ class LangForgeApp:
         t4_tree_sb.pack(side="right", fill="y")
         self.t4_tree.pack(side="left", fill="x", expand=True)
         self.t4_tree.bind("<<TreeviewSelect>>", self._t4_on_select)
+        self.t4_tree.bind("<Double-1>", lambda e: self._on_tree_rename(e, self.t4_tree, "rom_name", "translations", "rom_name"))
+        ttk.Label(tab4, text=S("lbl_rename_game_hint"), font=("Arial", 8), foreground="gray").pack(anchor="w", padx=4)
 
         # ── 修正平台區塊 ──
         t4_fix_frame = ttk.LabelFrame(tab4, text=S("lf_fix_platform"))
@@ -3101,6 +3166,8 @@ class LangForgeApp:
         t5_tree_sb.pack(side="right", fill="y")
         self.t5_tree.pack(side="left", fill="x", expand=True)
         self.t5_tree.bind("<<TreeviewSelect>>", self._t5_on_select)
+        self.t5_tree.bind("<Double-1>", lambda e: self._on_tree_rename(e, self.t5_tree, "rom_name", "guides", "rom_name"))
+        ttk.Label(tab5, text=S("lbl_rename_game_hint"), font=("Arial", 8), foreground="gray").pack(anchor="w", padx=4)
 
         ttk.Separator(tab5, orient="horizontal").pack(fill="x", pady=4)
 
@@ -3162,26 +3229,28 @@ class LangForgeApp:
         t6_tree_frame.pack(fill="x")
         self.t6_tree = ttk.Treeview(
             t6_tree_frame,
-            columns=("game", "started_at", "frames", "platform", "size"),
+            columns=("game", "duration", "frames", "platform", "size"),
             show="headings",
             height=6,
             selectmode="browse",
         )
-        self.t6_tree.heading("game", text=S("th_session_game"))
-        self.t6_tree.heading("started_at", text=S("th_session_start"))
-        self.t6_tree.heading("frames", text=S("th_session_frames"))
+        self.t6_tree.heading("game",     text=S("th_session_game"))
+        self.t6_tree.heading("duration", text=S("th_session_dur"))
+        self.t6_tree.heading("frames",   text=S("th_session_frames"))
         self.t6_tree.heading("platform", text=S("th_session_plat"))
-        self.t6_tree.heading("size", text=S("th_size"))
-        self.t6_tree.column("game", width=130, stretch=True)
-        self.t6_tree.column("started_at", width=130, anchor="center", stretch=False)
-        self.t6_tree.column("frames", width=50, anchor="e", stretch=False)
-        self.t6_tree.column("platform", width=80, stretch=False)
-        self.t6_tree.column("size", width=65, anchor="e", stretch=False)
+        self.t6_tree.heading("size",     text=S("th_size"))
+        self.t6_tree.column("game",     width=130, stretch=True)
+        self.t6_tree.column("duration", width=70,  anchor="center", stretch=False)
+        self.t6_tree.column("frames",   width=50,  anchor="e",      stretch=False)
+        self.t6_tree.column("platform", width=80,  stretch=False)
+        self.t6_tree.column("size",     width=65,  anchor="e",      stretch=False)
         t6_sb = ttk.Scrollbar(t6_tree_frame, orient="vertical", command=self.t6_tree.yview)
         self.t6_tree.configure(yscrollcommand=t6_sb.set)
         t6_sb.pack(side="right", fill="y")
         self.t6_tree.pack(side="left", fill="x", expand=True)
         self.t6_tree.bind("<<TreeviewSelect>>", self._t6_on_select)
+        self.t6_tree.bind("<Double-1>", lambda e: self._on_tree_rename(e, self.t6_tree, "game", "sessions", "game_name"))
+        ttk.Label(tab6, text=S("lbl_rename_game_hint"), font=("Arial", 8), foreground="gray").pack(anchor="w", padx=4)
 
         ttk.Separator(tab6, orient="horizontal").pack(fill="x", pady=4)
 
@@ -3214,7 +3283,13 @@ class LangForgeApp:
         self.display.attributes("-topmost", True)
         self.display.configure(bg="black")
         mesen_rect = self._find_mesen_window()
-        if mesen_rect:
+        saved_mode = self.config.get("winmode", "mesen")
+        free_dx = self.config.get("free_display_x")
+        free_dy = self.config.get("free_display_y")
+        if saved_mode == "free" and free_dx is not None and free_dy is not None:
+            disp_x = free_dx
+            disp_y = free_dy
+        elif mesen_rect:
             disp_x = mesen_rect[2] + 10
             disp_y = mesen_rect[1]
         else:
@@ -3259,6 +3334,13 @@ class LangForgeApp:
         self.display.withdraw()  # 啟動時隱藏，首次翻譯完成後才顯示
         self.display.protocol("WM_DELETE_WINDOW", self._on_display_close)
 
+        # 自由模式：記憶拖移位置
+        def _on_display_move(e):
+            if self.winmode_var.get() == "free" and self.display.winfo_viewable():
+                self.config["free_display_x"] = self.display.winfo_x()
+                self.config["free_display_y"] = self.display.winfo_y()
+        self.display.bind("<Configure>", _on_display_move)
+
         # 翻譯歷史導覽狀態
         self._nav_rom_name = ""  # 目前遊戲
         self._nav_ids = []  # 同遊戲所有 id（DESC）
@@ -3273,8 +3355,13 @@ class LangForgeApp:
         _load_app_icon(self.guide_display)
         self.guide_display.attributes("-topmost", True)
         self.guide_display.configure(bg="#1a1a2e")
-        guide_x = disp_x + DISPLAY_WIDTH_SMALL + 10
-        self.guide_display.geometry(f"{DISPLAY_WIDTH_SMALL}x{DISPLAY_INIT_HEIGHT}+{guide_x}+{disp_y}")
+        if saved_mode == "free" and self.config.get("free_guide_x") is not None:
+            guide_x = self.config["free_guide_x"]
+            guide_y = self.config.get("free_guide_y") or disp_y
+        else:
+            guide_x = disp_x + DISPLAY_WIDTH_SMALL + 10
+            guide_y = disp_y
+        self.guide_display.geometry(f"{DISPLAY_WIDTH_SMALL}x{DISPLAY_INIT_HEIGHT}+{guide_x}+{guide_y}")
 
         # 攻略導覽列（底部）
         guide_nav_bar = tk.Frame(self.guide_display, bg="#2a2a4e")
@@ -3313,6 +3400,13 @@ class LangForgeApp:
         self.guide_display.withdraw()  # 啟動時隱藏
         self.guide_display.protocol("WM_DELETE_WINDOW", self._on_guide_display_close)
 
+        # 自由模式：記憶拖移位置
+        def _on_guide_move(e):
+            if self.winmode_var.get() == "free" and self.guide_display.winfo_viewable():
+                self.config["free_guide_x"] = self.guide_display.winfo_x()
+                self.config["free_guide_y"] = self.guide_display.winfo_y()
+        self.guide_display.bind("<Configure>", _on_guide_move)
+
         # 攻略導覽狀態
         self._guide_nav_rom_name = ""
         self._guide_nav_ids = []
@@ -3347,6 +3441,7 @@ class LangForgeApp:
         self._session_dir = ""
         self._session_running = False
         self._session_translating = False  # 防止翻譯 thread 堆積
+        self._session_capture_fail_cnt = 0  # 連續截圖失敗計數
         self._session_capture_job = None
         self._session_prev_gray = None
         self._session_stable_cnt = 0
@@ -3364,6 +3459,7 @@ class LangForgeApp:
         # ── 套用已儲存主題 ──
         saved_theme = self.config.get("ui_theme", "light")
         apply_theme(self.root, saved_theme)
+        self._update_indicators()
         self._apply_treeview_tags(saved_theme)
 
         # ── 關閉 Splash，同時顯示主視窗 ──
@@ -3518,8 +3614,9 @@ class LangForgeApp:
             self._start_session()
 
     def _start_session(self):
-
-        game_name = self.title_var.get().strip() or "unknown"
+        win_title = self.title_var.get().strip()
+        game_name = win_title.split(" - ", 1)[1].strip() if " - " in win_title else win_title
+        game_name = game_name or "unknown"
         platform = self.platform_var.get().strip()
         ts = time.strftime("%Y%m%d_%H%M%S")
         safe_name = re.sub(r'[\\/:*?"<>|]', "_", game_name)
@@ -3544,7 +3641,8 @@ class LangForgeApp:
         self._session_prev_gray = None
         self._session_stable_cnt = 0
         self._session_last_hash = ""
-        self._session_translating = False  # 防止翻譯 thread 堆積
+        self._session_translating = False
+        self._session_capture_fail_cnt = 0
 
         self._session_status_label.config(text=S("session_recording"), foreground="red")
 
@@ -3566,10 +3664,13 @@ class LangForgeApp:
             self._playback_auto_open_job = None
 
         if self._session_id:
+            dir_size_kb = _calc_dir_size_kb(self._session_dir) if self._session_dir else 0
+            ended_at = time.strftime("%Y-%m-%d %H:%M:%S")
+            duration_seconds = int(time.time() - self._session_start_time) if self._session_start_time else 0
             conn = sqlite3.connect(self.DB_PATH)
             conn.execute(
-                "UPDATE sessions SET ended_at=?, total_frames=? WHERE id=?",
-                (time.strftime("%Y-%m-%d %H:%M:%S"), self._session_seq, self._session_id),
+                "UPDATE sessions SET ended_at=?, total_frames=?, dir_size_kb=?, duration_seconds=? WHERE id=?",
+                (ended_at, self._session_seq, dir_size_kb, duration_seconds, self._session_id),
             )
             conn.commit()
             conn.close()
@@ -3580,21 +3681,28 @@ class LangForgeApp:
         self._btn_session_start.config(text=S("btn_start_session"))
         self._session_status_label.config(text=S("session_idle"), foreground="gray")
         log(f"場次結束: session_id={self._session_id}, 共 {self._session_seq} 幀")
+        self.root.after(0, self._t6_refresh_games)
 
     def _session_elapsed_tick(self):
         if not self._session_running:
             return
-        elapsed = int(time.time() - self._session_start_time)
-        h = elapsed // 3600
-        m = (elapsed % 3600) // 60
-        s = elapsed % 60
-        if h > 0:
-            t_str = S("session_elapsed_h").format(h=h, m=m, s=s)
-        elif m > 0:
-            t_str = S("session_elapsed_m").format(m=m, s=s)
-        else:
-            t_str = S("session_elapsed_s").format(s=s)
-        self._session_status_label.config(text=S("session_elapsed").format(t=t_str), foreground="red")
+        try:
+            elapsed = int(time.time() - self._session_start_time)
+            h = elapsed // 3600
+            m = (elapsed % 3600) // 60
+            s = elapsed % 60
+            if h > 0:
+                t_str = S("session_elapsed_h").format(h=h, m=m, s=s)
+            elif m > 0:
+                t_str = S("session_elapsed_m").format(m=m, s=s)
+            else:
+                t_str = S("session_elapsed_s").format(s=s)
+            # 只有在無警告狀態下才更新計時（不覆蓋警告訊息）
+            cur_text = self._session_status_label.cget("text")
+            if not cur_text.startswith("⚠"):
+                self._session_status_label.config(text=S("session_elapsed").format(t=t_str), foreground="red")
+        except Exception as e:
+            log(f"[session] elapsed_tick 失敗: {e}")
         self._session_elapsed_job = self.root.after(1000, self._session_elapsed_tick)
 
     def _session_capture_loop(self):
@@ -3602,6 +3710,19 @@ class LangForgeApp:
             return
         try:
             image_pil = self._try_capture()
+            if image_pil is None:
+                log(f"[session] _try_capture 回傳 None，target={self.title_var.get().strip()!r}")
+                self._session_capture_fail_cnt += 1
+                # 連續 4 次（約 2 秒）找不到視窗才顯示警告，避免瞬間閃爍
+                if self._session_capture_fail_cnt == 4:
+                    self.root.after(0, lambda: self._session_status_label.config(
+                        text=S("session_warn_no_window"), foreground="orange"))
+            else:
+                if self._session_capture_fail_cnt >= 4:
+                    # 視窗重新找到，恢復錄製中顯示
+                    self.root.after(0, lambda: self._session_status_label.config(
+                        text=S("session_recording"), foreground="red"))
+                self._session_capture_fail_cnt = 0
             if image_pil is not None:
                 import numpy as np
 
@@ -3649,6 +3770,8 @@ class LangForgeApp:
                 self._session_prev_gray = gray
         except Exception as e:
             log(f"場次截圖失敗: {e}")
+            self.root.after(0, lambda err=str(e)[:40]: self._session_status_label.config(
+                text=S("session_warn_capture_fail").format(err=err), foreground="orange"))
         self._session_capture_job = self.root.after(SESSION_CAPTURE_INTERVAL_MS, self._session_capture_loop)
 
     def _session_translate(self, image_pil, seq, snap=None):
@@ -3738,14 +3861,17 @@ class LangForgeApp:
                     self.root.after(0, _update_quota)
         except Exception as e:
             log(f"場次翻譯失敗: seq={seq}, {e}")
+            self.root.after(0, lambda s=seq, err=str(e)[:40]: self._session_status_label.config(
+                text=S("session_warn_api_fail").format(seq=s, err=err), foreground="orange"))
         finally:
             self._session_translating = False
+
+    def _open_playback_window(self):
         if self._playback_window and self._playback_window.winfo_exists():
             self._playback_window.lift()
             return
         if not self._session_id:
             return
-
         self._playback_window = tk.Toplevel(self.root)
         self._playback_window.title(S("title_playback_live").format(name=self._session_game_name))
         self._playback_window.configure(bg="black")
@@ -3782,10 +3908,8 @@ class LangForgeApp:
 
         delay_frames = int(PLAYBACK_DELAY_SECONDS / (SESSION_CAPTURE_INTERVAL_MS / 1000))
         if self._session_seq > delay_frames:
-            # 錄製時間充足：從延遲點開始
             self._playback_seq = self._session_seq - delay_frames
         else:
-            # 錄製時間不足 10 分鐘：從第 1 幀開始播放所有已錄內容
             self._playback_seq = 1
         self._playback_last_trans = None
         self._playback_loop()
@@ -3884,12 +4008,14 @@ class LangForgeApp:
             game = self.t6_game_var.get()
             if game == S("all_games"):
                 rows = self._db_conn.execute(
-                    "SELECT id, game_name, started_at, total_frames, platform, dir_size_kb "
+                    "SELECT id, game_name, started_at, ended_at, total_frames, platform, dir_size_kb, "
+                    "COALESCE(duration_seconds, 0) "
                     f"FROM sessions ORDER BY started_at DESC LIMIT {T6_PAGE_SIZE}"
                 ).fetchall()
             else:
                 rows = self._db_conn.execute(
-                    "SELECT id, game_name, started_at, total_frames, platform, dir_size_kb "
+                    "SELECT id, game_name, started_at, ended_at, total_frames, platform, dir_size_kb, "
+                    "COALESCE(duration_seconds, 0) "
                     f"FROM sessions WHERE game_name=? ORDER BY started_at DESC LIMIT {T6_PAGE_SIZE}",
                     (game,),
                 ).fetchall()
@@ -3899,10 +4025,20 @@ class LangForgeApp:
             for iid in existing_ids - new_ids:
                 self.t6_tree.delete(iid)
             for r in reversed(rows):
-                sid, gname, started, frames, plat, size_kb = r
+                sid, gname, started, ended, frames, plat, size_kb, dur_secs = r
                 size_str = f"{size_kb/1024:.1f} MB" if (size_kb or 0) >= 1024 else f"{size_kb or 0} KB"
+                ended_str = ended or ""
+                # duration_seconds 為 0 且有 started/ended 時，用時間差回算（相容舊紀錄）
+                if not dur_secs and started and ended:
+                    try:
+                        from datetime import datetime
+                        delta = datetime.strptime(ended, "%Y-%m-%d %H:%M:%S") - datetime.strptime(started, "%Y-%m-%d %H:%M:%S")
+                        dur_secs = max(0, int(delta.total_seconds()))
+                    except Exception:
+                        dur_secs = 0
+                dur_str = _fmt_duration(dur_secs)
                 if str(sid) not in existing_ids:
-                    self.t6_tree.insert("", 0, iid=str(sid), values=(gname, started, frames or 0, plat or "", size_str))
+                    self.t6_tree.insert("", 0, iid=str(sid), values=(gname, dur_str, frames or 0, plat or "", size_str))
         except Exception as e:
             log(f"[Tab6] load list 失敗: {e}")
 
@@ -4462,25 +4598,94 @@ class LangForgeApp:
         self.t4_fix_platform_combo["values"] = plats
         self.t4_fix_platform_var.set(plats[0] if plats else "")
 
-    def _t4_apply_platform(self):
+    def _on_tree_rename(self, event, tree: ttk.Treeview, col: str, table: str, db_col: str):
+        region = tree.identify_region(event.x, event.y)
+        if region != "cell":
+            return
+        col_id = tree.identify_column(event.x)
+        # 只有點到第一欄（遊戲名稱）才觸發
+        if col_id != "#1":
+            return
+        sel = tree.selection()
+        if not sel:
+            return
+        iid = sel[0]
+        old_name = tree.item(iid, "values")[0]
 
+        win = tk.Toplevel(self.root)
+        win.title(S("dlg_rename_game"))
+        win.resizable(False, False)
+        win.grab_set()
+        _load_app_icon(win)
+
+        ttk.Label(win, text=S("dlg_rename_game") + ":", font=("Arial", 9)).pack(padx=16, pady=(12, 4), anchor="w")
+        name_var = tk.StringVar(value=old_name)
+        entry = ttk.Entry(win, textvariable=name_var, width=36)
+        entry.pack(padx=16, pady=(0, 8))
+        entry.select_range(0, "end")
+        entry.focus_set()
+
+        def _apply():
+            new_name = name_var.get().strip()
+            if not new_name or new_name == old_name:
+                win.destroy()
+                return
+            try:
+                conn = sqlite3.connect(self.DB_PATH)
+                # 主表更新
+                conn.execute(f"UPDATE {table} SET {db_col}=? WHERE {db_col}=?", (new_name, old_name))
+                # 跨表關聯更新（三表同步）
+                cross = [
+                    ("translations", "rom_name"),
+                    ("guides",       "rom_name"),
+                    ("sessions",     "game_name"),
+                ]
+                for t, c in cross:
+                    if t != table:
+                        conn.execute(f"UPDATE {t} SET {c}=? WHERE {c}=?", (new_name, old_name))
+                conn.commit()
+                conn.close()
+                # 更新所有 Treeview 同名項目
+                for item in tree.get_children():
+                    vals = list(tree.item(item, "values"))
+                    if vals[0] == old_name:
+                        vals[0] = new_name
+                        tree.item(item, values=vals)
+                # 同步刷新其他兩個 Tab 的 Treeview
+                for other_tree in [self.t4_tree, self.t5_tree, self.t6_tree]:
+                    if other_tree is not tree:
+                        for item in other_tree.get_children():
+                            vals = list(other_tree.item(item, "values"))
+                            if vals[0] == old_name:
+                                vals[0] = new_name
+                                other_tree.item(item, values=vals)
+                log(f"[rename] {old_name!r} → {new_name!r} (translations/guides/sessions 同步更新)")
+                self._set_status(S("status_custom_engine_saved").format(name=new_name), "green")
+            except Exception as e:
+                log(f"[rename] 失敗: {e}")
+            win.destroy()
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(0, 12))
+        ttk.Button(btn_row, text=S("btn_rename_game"), command=_apply,   width=12).pack(side="left", padx=6)
+        ttk.Button(btn_row, text=S("btn_cancel"),      command=win.destroy, width=10).pack(side="left", padx=6)
+        entry.bind("<Return>", lambda e: _apply())
+
+    def _t4_apply_platform(self):
         sel = self.t4_tree.selection()
         if not sel:
             log("[Tab4] 套用平台：未選取任何紀錄")
             return
         db_id = int(sel[0])
         try:
-            conn = sqlite3.connect(self.DB_PATH)
-            row = conn.execute("SELECT rom_name FROM translations WHERE id=?", (db_id,)).fetchone()
+            row = self._db_conn.execute("SELECT rom_name FROM translations WHERE id=?", (db_id,)).fetchone()
             if not row:
-                conn.close()
                 return
             rom_name = row[0]
             new_platform = self.t4_fix_platform_var.get().strip()
-            conn.execute("UPDATE translations SET platform=? WHERE rom_name=?", (new_platform, rom_name))
-            conn.commit()
-            affected = conn.execute("SELECT changes()").fetchone()[0]
-            conn.close()
+            self._db_conn.execute("UPDATE translations SET platform=? WHERE rom_name=?", (new_platform, rom_name))
+            self._db_conn.commit()
+            affected = self._db_conn.execute("SELECT changes()").fetchone()[0]
             log(f"[Tab4] 已將「{rom_name}」共 {affected} 筆紀錄的平台更新為「{new_platform}」")
             self._t4_refresh_games()
             self._t4_load_list()
@@ -4531,18 +4736,20 @@ class LangForgeApp:
                 params,
             ).fetchall()
 
-            # 差異更新：只刪除不在新結果的舊 row，只新增不在舊 row 的新資料
+            # 差異更新：刪除不在新結果的舊 row，新增/更新其餘 row
             new_ids = {str(row[0]) for row in rows}
             existing_ids = set(self.t4_tree.get_children())
             for iid in existing_ids - new_ids:
                 self.t4_tree.delete(iid)
             for row in reversed(rows):
                 iid = str(row[0])
+                new_vals = (row[5] or "", row[1], row[3] or "", row[4] or "")
                 if iid not in existing_ids:
-                    self.t4_tree.insert(
-                        "", 0, iid=iid,
-                        values=(row[5] or "", row[1], row[3] or "", row[4] or "")
-                    )
+                    self.t4_tree.insert("", 0, iid=iid, values=new_vals)
+                else:
+                    # 已存在但資料可能變動（如平台改名）→ 更新
+                    if self.t4_tree.item(iid, "values") != new_vals:
+                        self.t4_tree.item(iid, values=new_vals)
         except Exception as e:
             log(f"[Tab4] 載入清單失敗: {e}")
 
@@ -4697,9 +4904,13 @@ class LangForgeApp:
                 self.t5_tree.delete(iid)
             for row in reversed(rows):
                 iid = str(row[0])
+                progress_short = (row[3] or "")[:20]
+                new_vals = (row[4] or "", row[1], progress_short)
                 if iid not in existing_ids:
-                    progress_short = (row[3] or "")[:20]
-                    self.t5_tree.insert("", 0, iid=iid, values=(row[4] or "", row[1], progress_short))
+                    self.t5_tree.insert("", 0, iid=iid, values=new_vals)
+                else:
+                    if self.t5_tree.item(iid, "values") != new_vals:
+                        self.t5_tree.item(iid, values=new_vals)
         except Exception as e:
             log(f"[Tab5] 載入清單失敗: {e}")
 
@@ -4869,6 +5080,7 @@ class LangForgeApp:
         try:
             target = self.title_var.get().lower().strip()
             if not target:
+                log("[capture] title_var 為空，無法擷取")
                 return None
 
             # ── hwnd 快取：先驗證上次找到的 hwnd 是否仍有效 ──
@@ -4898,6 +5110,7 @@ class LangForgeApp:
                 self._try_capture_target = target
 
             if not hwnd:
+                log(f"[capture] 找不到視窗 hwnd，target={target!r}")
                 return None
             try:
                 crop_top = int(self.crop_top_var.get())
@@ -4906,8 +5119,9 @@ class LangForgeApp:
             if crop_top < 0:
                 crop_top = 0
             return self._grab_window_hwnd(hwnd, crop_top)
-        except Exception:
+        except Exception as e:
             self._try_capture_hwnd = None  # 出錯時清除快取
+            log(f"[capture] _try_capture 例外: {e}")
             return None
 
     def _clear_queue(self):
@@ -5096,6 +5310,25 @@ class LangForgeApp:
             if getattr(self, "_position_poll_job", None):
                 self.root.after_cancel(self._position_poll_job)
                 self._position_poll_job = None
+        except Exception:
+            pass
+        # 取消場次計時、截圖迴圈、播放自動開啟（_stop_session 可能未被呼叫）
+        try:
+            if getattr(self, "_session_elapsed_job", None):
+                self.root.after_cancel(self._session_elapsed_job)
+                self._session_elapsed_job = None
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_session_capture_job", None):
+                self.root.after_cancel(self._session_capture_job)
+                self._session_capture_job = None
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_playback_auto_open_job", None):
+                self.root.after_cancel(self._playback_auto_open_job)
+                self._playback_auto_open_job = None
         except Exception:
             pass
         try:
@@ -5391,6 +5624,58 @@ class LangForgeApp:
     # ══════════════════════════════════════════
     # 全域快捷鍵
     # ══════════════════════════════════════════
+    def _bind_hotkey_capture(self, entry: ttk.Entry, var: tk.StringVar, config_key: str):
+        original_val = [var.get()]  # 用 list 讓 closure 可修改
+
+        def _on_focus_in(e):
+            original_val[0] = var.get()
+            entry.config(foreground="gray")
+            var.set(S("lbl_hotkey_prompt"))
+            entry.unbind("<KeyRelease>")
+            entry.bind("<KeyPress>", _on_key)
+
+        def _on_focus_out(e):
+            entry.unbind("<KeyPress>")
+            cur = var.get()
+            if cur == S("lbl_hotkey_prompt") or cur == S("lbl_hotkey_invalid"):
+                var.set(original_val[0])
+            entry.config(foreground="")
+
+        def _on_key(e):
+            keysym = e.keysym
+            # 忽略純 modifier 按下
+            if keysym in ("Control_L", "Control_R", "Shift_L", "Shift_R",
+                          "Alt_L", "Alt_R", "Super_L", "Super_R", "Meta_L", "Meta_R"):
+                return "break"
+            # 建立組合鍵字串（keyboard 模組格式）
+            parts = []
+            if e.state & 0x4:   parts.append("ctrl")
+            if e.state & 0x1:   parts.append("shift")
+            if e.state & 0x20000:  parts.append("alt")
+            # 主鍵：F1-F12 直接用 keysym 小寫，其他用 char
+            if keysym.startswith("F") and keysym[1:].isdigit():
+                parts.append(keysym.lower())
+            elif len(keysym) == 1:
+                parts.append(keysym.lower())
+            else:
+                parts.append(keysym.lower())
+            if len(parts) >= 2:  # 必須有至少一個 modifier
+                combo = "+".join(parts)
+                var.set(combo)
+                entry.config(foreground="")
+                self.config[config_key] = combo
+                save_config(self.config)
+                log(f"快捷鍵已更新: {config_key} = {combo}")
+                entry.unbind("<KeyPress>")
+                entry.after(100, lambda: entry.master.focus_set())  # 移走焦點
+            else:
+                entry.config(foreground="red")
+                var.set(S("lbl_hotkey_invalid"))
+            return "break"
+
+        entry.bind("<FocusIn>",  _on_focus_in)
+        entry.bind("<FocusOut>", _on_focus_out)
+
     def _toggle_hotkey(self):
         if not HAS_KEYBOARD:
             self._set_status(S("status_keyboard_need"), "red")
@@ -5557,13 +5842,15 @@ class LangForgeApp:
             dh = self.display.winfo_height()
             has_guide = hasattr(self, "guide_display") and self.guide_display.winfo_exists()
 
-            if mode == "main":
-                mx = self.root.winfo_x()
-                my = self.root.winfo_y()
-                mw = self.root.winfo_width()
-                dx, dy = mx + mw + 10, my
+            # corner 模式重新偵測螢幕，確保插拔/解析度變更後仍正確
+            if mode == "corner":
+                self._monitors = _get_monitors()
 
-            elif mode == "corner":
+            # 自由模式：不移動任何視窗
+            if mode == "free":
+                return
+
+            if mode == "main":
                 # 取得主視窗目前所在螢幕的邊界
                 mx = self.root.winfo_x()
                 my = self.root.winfo_y()
@@ -5615,21 +5902,24 @@ class LangForgeApp:
 
             # main / mesen / sides 模式：設定翻譯視窗位置
             self._set_display_geom(f"+{dx}+{dy}")
-            # sides 模式且找到目標視窗時，攻略視窗已在上方個別定位，不再覆蓋
             if has_guide and mode != "sides":
+                # main / mesen 模式：攻略在翻譯右側
                 self._set_guide_geom(f"+{dx + dw + 10}+{dy}")
             elif has_guide and mode == "sides":
-                # sides fallback（找不到目標視窗）：攻略跟在翻譯右側
-                self._set_guide_geom(f"+{dx + dw + 10}+{dy}")
+                # sides fallback（找不到目標視窗）：攻略在翻譯左側
+                gw = self.guide_display.winfo_width()
+                self._set_guide_geom(f"+{max(0, dx - gw - 10)}+{dy}")
 
         except:
             pass
 
     def _on_screen_change(self, event=None):
+        self._monitors = _get_monitors()  # 重新偵測螢幕（支援插拔/解析度變更）
         label = self.screen_var.get()
         mon = next((m for m in self._monitors if m["label"] == label), None)
         if mon is None:
-            return
+            mon = self._monitors[0]
+            self.screen_var.set(mon["label"])
         self.config["main_screen"] = mon["index"]
         save_config(self.config)
         self.root.geometry(f'+{mon["x"] + 10}+{mon["y"] + 10}')
@@ -6251,7 +6541,7 @@ class LangForgeApp:
 
             # ── 套件未安裝 ──
             if isinstance(e, (ModuleNotFoundError, ImportError)):
-                missing = err_str.replace("No module named ", "").strip("'")
+                missing = _extract_pkg_name(err_str)
                 self._set_status(S("status_pkg_missing").format(pkg=missing), "red")
             elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "rate_limit" in err_str.lower():
                 retry_sec = self._parse_429_retry_delay(err_str)
@@ -6467,7 +6757,7 @@ class LangForgeApp:
             log(f"合併請求失敗: {err_str}")
             # ── 套件未安裝 ──
             if isinstance(e, (ModuleNotFoundError, ImportError)):
-                missing = err_str.replace("No module named ", "").strip("'")
+                missing = _extract_pkg_name(err_str)
                 self._set_status(S("status_pkg_missing").format(pkg=missing), "red")
             elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "rate_limit" in err_str.lower():
                 retry_sec = self._parse_429_retry_delay(err_str)
@@ -6700,7 +6990,7 @@ class LangForgeApp:
 
             # ── 套件未安裝 ──
             if isinstance(e, (ModuleNotFoundError, ImportError)):
-                missing = err_str.replace("No module named ", "").strip("'")
+                missing = _extract_pkg_name(err_str)
                 self._set_status(S("status_pkg_missing").format(pkg=missing), "red")
             elif "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                 if self._is_quota_zero(err_str):
@@ -6850,13 +7140,14 @@ class LangForgeApp:
         if "sessions" not in existing_tables:
             conn.execute("""
                 CREATE TABLE sessions (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    game_name    TEXT NOT NULL,
-                    platform     TEXT,
-                    started_at   TEXT NOT NULL,
-                    ended_at     TEXT,
-                    total_frames INTEGER DEFAULT 0,
-                    dir_size_kb  INTEGER DEFAULT 0
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_name        TEXT NOT NULL,
+                    platform         TEXT,
+                    started_at       TEXT NOT NULL,
+                    ended_at         TEXT,
+                    total_frames     INTEGER DEFAULT 0,
+                    dir_size_kb      INTEGER DEFAULT 0,
+                    duration_seconds INTEGER DEFAULT 0
                 )
             """)
         # migration: 加 dir_size_kb
@@ -6867,6 +7158,9 @@ class LangForgeApp:
         )
         if "dir_size_kb" not in existing_cols and "sessions" in existing_tables:
             conn.execute("ALTER TABLE sessions ADD COLUMN dir_size_kb INTEGER DEFAULT 0")
+            conn.commit()
+        if "duration_seconds" not in existing_cols and "sessions" in existing_tables:
+            conn.execute("ALTER TABLE sessions ADD COLUMN duration_seconds INTEGER DEFAULT 0")
             conn.commit()
         if "frames" not in existing_tables:
             conn.execute("""
