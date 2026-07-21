@@ -1,4 +1,4 @@
-"""LangForge V1.1.1
+"""LangForge V1.5.1
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -169,8 +169,8 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.1.1"
-DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
+ABOUT_VERSION = "V1.5.1"
+DEBUG_COORD = True  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
 ABOUT_LICENSE = "Copyright © 2026 GoOnSoft. All rights reserved."
@@ -188,6 +188,17 @@ UI_STRINGS = {
         "tab_history": "  歷史翻譯  ",
         "tab_guide": "  歷史攻略  ",
         "tab_session": "  歷史錄製  ",
+        "tab_simple": "  簡易模式  ",
+        "menu_toggle_mode": "切換操作模式",
+        "lf_simple_engine": "本地引擎",
+        "lf_simple_capture": "擷取設定",
+        "lf_simple_actions": "功能",
+        "btn_simple_translate": "單次翻譯",
+        "cb_simple_auto": "自動翻譯",
+        "lbl_simple_color": "字幕顏色:",
+        "color_white": "白", "color_yellow": "黃", "color_red": "紅", "color_blue": "藍", "color_green": "綠",
+        "lbl_simple_bg_color": "底色:", "color_bg_black": "黑", "color_bg_white": "白底",
+        "lbl_simple_font_size": "字級:",
         # ── Tab1 翻譯操作 ──
         "lbl_engine": "翻譯引擎:",
         "lbl_trans_options": "翻譯選項",
@@ -242,6 +253,8 @@ UI_STRINGS = {
         "status_ocr_running": "OCR 辨識中...",
         "status_ocr_no_easyocr": "缺少 easyocr，請執行 pip install easyocr",
         "status_ocr_no_text": "OCR 未偵測到可信文字",
+        "status_ocr_src_auto": "OCR 不支援「所有外文」，請在擷取設定指定遊戲語言",
+        "status_no_text_found": "未偵測到可翻譯文字",
         "status_ocr_fail": "OCR 失敗: {msg}",
         "status_gt_fail": "Google 翻譯失敗: {msg}",
         "status_ocr_no_result": "OCR 無有效結果",
@@ -480,7 +493,7 @@ UI_STRINGS = {
         "dlg_new_name_prompt": "新名稱:",
         "status_model_list_updated": "已更新 {engine} 模型清單（{n} 個）",
         "status_fetching_models":     "{engine} 模型清單更新中...",
-        "status_fetch_models_failed": "{engine} API 無回應，已套用內建清單",
+        "status_fetch_models_failed": "{engine} 使用內建模型清單（此引擎不支援線上列舉，屬正常現象）",
         "lbl_guide_toggle_on": "開啟",
         "lbl_guide_toggle_off": "關閉",
         "dlg_file_title": "選擇圖片檔案",
@@ -508,6 +521,17 @@ UI_STRINGS = {
         "tab_history": "  History  ",
         "tab_guide": "  Guide  ",
         "tab_session": "  Sessions  ",
+        "tab_simple": "  Simple  ",
+        "menu_toggle_mode": "Toggle Mode",
+        "lf_simple_engine": "Local Engine",
+        "lf_simple_capture": "Capture",
+        "lf_simple_actions": "Actions",
+        "btn_simple_translate": "Translate Once",
+        "cb_simple_auto": "Auto Translate",
+        "lbl_simple_color": "Subtitle color:",
+        "color_white": "W", "color_yellow": "Y", "color_red": "R", "color_blue": "B", "color_green": "G",
+        "lbl_simple_bg_color": "BG:", "color_bg_black": "Dark", "color_bg_white": "Light",
+        "lbl_simple_font_size": "Size:",
         # ── Tab1 ──
         "lbl_engine": "Engine:",
         "lbl_trans_options": "Translation Options",
@@ -562,6 +586,8 @@ UI_STRINGS = {
         "status_ocr_running": "OCR analyzing...",
         "status_ocr_no_easyocr": "Missing easyocr, run pip install easyocr",
         "status_ocr_no_text": "No confident text detected by OCR",
+        "status_ocr_src_auto": "OCR doesn't support 'All Foreign Text', please select a specific language",
+        "status_no_text_found": "No translatable text detected",
         "status_ocr_fail": "OCR failed: {msg}",
         "status_gt_fail": "Google Translate failed: {msg}",
         "status_ocr_no_result": "OCR no valid results",
@@ -837,7 +863,7 @@ UI_STRINGS = {
         "dlg_new_name_prompt": "New name:",
         "status_model_list_updated": "{engine} model list updated ({n} models)",
         "status_fetching_models":     "Fetching {engine} model list...",
-        "status_fetch_models_failed": "{engine} API unavailable, using built-in list",
+        "status_fetch_models_failed": "{engine} using built-in model list (online listing not supported — this is normal)",
         "lbl_guide_toggle_on": "On",
         "lbl_guide_toggle_off": "Off",
         "dlg_file_title": "Select Image File",
@@ -916,6 +942,9 @@ IMG_CLOUD_LARGE  = (1280, 75)
 IMG_OLLAMA_SMALL  = (None, 85)
 IMG_OLLAMA_MEDIUM = (800,  75)
 IMG_OLLAMA_LARGE  = (1024, 70)
+
+IMG_SIMPLE = (None, 75)
+_FONT_LEVEL_SIZES = {1: 48, 2: 36, 3: 24, 4: 18, 5: 13}  # 5 級字型，1=最大  # ponytail: 簡易模式不縮圖，本地推理無頻寬瓶頸，辨識率優先
 
 DISPLAY_WIDTH_SMALL      = 512
 DISPLAY_WIDTH_MEDIUM_PX1 = 700    # 原圖 513～700px 時輸出
@@ -1080,6 +1109,8 @@ MODEL_DAILY_LIMITS = {
     "gemini-3.1-pro":             0,   # 付費，無免費配額
     # ── Groq 免費版 ──
     "meta-llama/llama-4-scout-17b-16e-instruct": 1000,   # RPM=30
+    "qwen/qwen3.6-27b": 1000,                            # RPM=30，免費 tier 標準配額
+    "gemma-4-31b": 2100,                                 # Cerebras 免費 1M tokens/天，~475 tokens/次估算
     "openai/gpt-oss-120b": 500,             # Maverick 替代，RPM=30
     # ── Mistral ──
     "mistral-small-latest": 500,            # 視覺支援，RPM=30
@@ -1102,21 +1133,23 @@ MODEL_RPM = {
     "gemini-3-flash":        15,
     "gemini-3.1-flash-lite": 30,
     "gemini-2.5-flash":       5,
-    "gemini-2.5-flash-lite": 30,
+    "gemini-2.5-flash-lite": 10,   # 免費 tier 上限
     "gemini-3.1-pro":        10,
     "meta-llama/llama-4-scout-17b-16e-instruct": 30,
+    "qwen/qwen3.6-27b": 30,
     "openai/gpt-oss-120b": 30,
     "mistral-small-latest": 30,
     "mistral-medium-latest": 20,
     "gpt-4.1-mini": 60,
     "gpt-4.1": 30,
     "gpt-4o": 30,
+    "gemma-4-31b": 30,
 }
 
 # ══════════════════════════════════════════
 # 引擎定義（順序：Gemini → Groq → Mistral → OpenAI → Claude → Grok）
 # ══════════════════════════════════════════
-ENGINE_ORDER = ["gemini", "groq", "mistral", "openai", "claude", "grok"]
+ENGINE_ORDER = ["gemini", "groq", "mistral", "openai", "claude", "grok", "hf", "together", "cerebras", "nvidia"]
 
 ENGINE_DISPLAY = {
     "gemini": "Gemini",
@@ -1125,6 +1158,10 @@ ENGINE_DISPLAY = {
     "openai": "OpenAI",
     "claude": "Claude",
     "grok": "Grok",
+    "hf": "HuggingFace",
+    "together": "Together AI",
+    "cerebras": "Cerebras",
+    "nvidia": "NVIDIA NIM",
 }
 
 ENGINE_MODELS = {
@@ -1136,8 +1173,8 @@ ENGINE_MODELS = {
         "gemini-3.1-pro",                  # 付費旗艦
     ],
     "groq": [
-        "meta-llama/llama-4-scout-17b-16e-instruct",  # 推薦：1000 RPD，視覺
-        "openai/gpt-oss-120b",                         # 高品質推理（Maverick 替代）
+        "meta-llama/llama-4-scout-17b-16e-instruct",  # 棄用中（2026-06-17），視覺
+        "qwen/qwen3.6-27b",                            # 推薦替代：多模態，支援圖片
     ],
     "mistral": [
         "mistral-small-latest",   # 視覺支援，高配額
@@ -1157,6 +1194,24 @@ ENGINE_MODELS = {
         "grok-2-vision-1212",  # 穩定視覺模型
         "grok-4",              # 旗艦多模態（2025/07）
     ],
+    "hf": [
+        "meta-llama/Llama-3.2-11B-Vision-Instruct",   # Llama 3.2 視覺，Router 確認支援
+        "Qwen/Qwen2.5-VL-7B-Instruct",                # Qwen 視覺 7B
+        "mistralai/Pixtral-12B-2409",                  # Pixtral 視覺
+    ],
+    "together": [
+        "meta-llama/Llama-Vision-Free",                  # 完全免費視覺模型
+        "meta-llama/Llama-3.2-11B-Vision-Instruct",      # Llama 3.2 11B 視覺（免費）
+        "meta-llama/Llama-3.2-90B-Vision-Instruct",      # Llama 3.2 90B 視覺（免費）
+        "meta-llama/Llama-4-Scout-17B-16E-Instruct",     # Llama 4 Scout 視覺（免費）
+    ],
+    "cerebras": [
+        "gemma-4-31b",   # Gemma 4 31B 多模態視覺，1800+ tok/s，免費（Preview）
+    ],
+    "nvidia": [
+        "meta/llama-3.2-11b-vision-instruct",  # 確認可用，NVIDIA NIM 文件收錄
+        "meta/llama-3.2-90b-vision-instruct",   # 較大版本，免費額度可用
+    ],
 }
 
 ENGINE_DEFAULT_MODEL = {
@@ -1166,6 +1221,10 @@ ENGINE_DEFAULT_MODEL = {
     "openai": "gpt-4.1-mini",
     "claude": "claude-sonnet-4-6",
     "grok": "grok-2-vision-1212",
+    "hf": "meta-llama/Llama-3.2-11B-Vision-Instruct",
+    "together": "meta-llama/Llama-Vision-Free",
+    "cerebras": "gemma-4-31b",
+    "nvidia": "meta/llama-3.2-11b-vision-instruct",
 }
 
 ALL_MODELS = []
@@ -1305,6 +1364,45 @@ def save_config(data):
 # ==========================================
 # 翻譯 Prompt（五引擎共用，動態語言帶入）
 # ==========================================
+def build_simple_prompt(src_lang: str, tgt_lang: str) -> str:
+    """簡易模式提示詞：英文指令、不需要座標、只翻譯對話文字。"""
+    src = src_lang.split("(")[0].strip()
+    tgt = tgt_lang.split("(")[0].strip()
+    return (
+        f"Translate {src} dialogue and story text in this game screenshot to {tgt}.\n"
+        f"Rules:\n"
+        f"1. Translate ONLY dialogue/story text. Ignore: menus, HP/MP, status numbers, button labels, UI.\n"
+        f"2. The 'tw' value MUST be the {tgt} translation — never copy the original {src} text.\n"
+        f"3. Keep character names unchanged.\n"
+        f"Return JSON array: [{{\"tw\": \"translated text\"}}]\n"
+        f"If no dialogue text, return []. Output JSON only."
+    )
+
+
+def _build_simple_display_text(segments: list) -> str:
+    """分析 segment y 座標，建立簡易模式的顯示文字。
+    情境3（上下同時有對話框）：用 \\n\\n 隔開；其他情境直接按 y 排序後 \\n 連接。
+    ponytail: 情境1/2/4/5 已由現有 shrink 邏輯處理，只有情境3需要額外判斷。
+    """
+    valid = [s for s in segments if isinstance(s, dict) and s.get("tw", "").strip()]
+    if not valid:
+        return ""
+    ys = [float(s.get("y", 0.5)) for s in valid]
+    has_top = any(y < 0.45 for y in ys)
+    has_bot = any(y > 0.55 for y in ys)
+    if has_top and has_bot:
+        # 情境3：上下分開
+        top_segs = sorted([s for s in valid if float(s.get("y", 0.5)) < 0.5],
+                          key=lambda s: float(s.get("y", 0.5)))
+        bot_segs = sorted([s for s in valid if float(s.get("y", 0.5)) >= 0.5],
+                          key=lambda s: float(s.get("y", 0.5)))
+        top_text = "\n".join(s["tw"] for s in top_segs)
+        bot_text = "\n".join(s["tw"] for s in bot_segs)
+        return f"{top_text}\n\n{bot_text}" if top_text and bot_text else top_text or bot_text
+    # 情境1/2/4/5：按 y 排序後直接換行
+    return "\n".join(s["tw"] for s in sorted(valid, key=lambda s: float(s.get("y", 0.5))))
+
+
 def build_translate_prompt(src_lang: str, tgt_lang: str) -> str:
     if src_lang.startswith("All Foreign Text"):
         src_desc = "所有非母語的外文文字（無論何種語言）"
@@ -1402,7 +1500,9 @@ def _get_display_width(orig_w: int) -> int:
 
 def _prepare_img_for_engine(image_pil, engine_type: str = "cloud"):
     orig_w = image_pil.width
-    if engine_type == "ollama":
+    if engine_type == "simple":
+        max_w, quality = IMG_SIMPLE
+    elif engine_type == "ollama":
         if orig_w <= IMG_SMALL_THRESHOLD:
             max_w, quality = IMG_OLLAMA_SMALL
         elif orig_w <= IMG_MEDIUM_THRESHOLD:
@@ -1440,7 +1540,25 @@ def _img_to_jpeg_bytes(image_pil, quality: int = 75):
 
 
 def _parse_json_response(text):
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    if "<think>" in text:
+        text = text[:text.index("<think>")]
+    text = text.strip()
     cleaned = re.sub(r"```json\s*|```", "", text).strip()
+    if not cleaned:
+        return []
+
+    # ── Bullet point JSON fallback（如 NVIDIA NIM Llama 回傳 `* [{...}]` 格式）──
+    bullet_matches = re.findall(r'\[\{.*?\}\]', text, re.DOTALL)
+    if bullet_matches and not cleaned.startswith('['):
+        try:
+            merged = []
+            for m in bullet_matches:
+                merged.extend(json.loads(m))
+            if merged:
+                return merged
+        except json.JSONDecodeError:
+            pass
 
     # 第一次嘗試：直接解析
     try:
@@ -1536,6 +1654,18 @@ def _get_client(engine: str, api_key: str):
     elif engine == "grok":
         from openai import OpenAI
         client = OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
+    elif engine == "hf":
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url="https://router.huggingface.co/v1")
+    elif engine == "together":
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url="https://api.together.xyz/v1")
+    elif engine == "cerebras":
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url="https://api.cerebras.ai/v1")
+    elif engine == "nvidia":
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url="https://integrate.api.nvidia.com/v1")
     else:
         raise ValueError(f"未知引擎: {engine}")
 
@@ -1568,21 +1698,20 @@ def call_groq(api_key, model, image_pil, prompt):
     client = _get_client("groq", api_key)
     image_pil, quality = _prepare_img_for_engine(image_pil, "cloud")
     img_b64 = _img_to_jpeg_b64(image_pil, quality)
+    needs_no_think = "qwen3" in model.lower() or "minicpm" in model.lower()
+    user_text = f"/no_think\n{prompt}" if needs_no_think else prompt
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": user_text},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+        ],
+    }]
     chat_completion = client.chat.completions.create(
         model=model,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
-                    },
-                ],
-            }
-        ],
-        max_completion_tokens=2048,
+        messages=messages,
+        max_completion_tokens=4096,
+        timeout=10,
     )
     return _parse_json_response(chat_completion.choices[0].message.content)
 
@@ -1670,6 +1799,99 @@ def call_grok(api_key, model, image_pil, prompt):
     return _parse_json_response(response.choices[0].message.content)
 
 
+
+def call_hf(api_key, model, image_pil, prompt):
+    """HuggingFace Inference API (OpenAI-compatible chat.completions + vision)"""
+    client = _get_client("hf", api_key)
+    image_pil, quality = _prepare_img_for_engine(image_pil, "cloud")
+    img_b64 = _img_to_jpeg_b64(image_pil, quality)
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                ],
+            }
+        ],
+        max_tokens=2048,
+        timeout=10,
+    )
+    return _parse_json_response(response.choices[0].message.content)
+
+
+
+def call_together(api_key, model, image_pil, prompt):
+    """Together AI (OpenAI-compatible chat.completions + vision)"""
+    client = _get_client("together", api_key)
+    image_pil, quality = _prepare_img_for_engine(image_pil, "cloud")
+    img_b64 = _img_to_jpeg_b64(image_pil, quality)
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                ],
+            }
+        ],
+        max_tokens=2048,
+        timeout=10,
+    )
+    return _parse_json_response(response.choices[0].message.content)
+
+
+
+def call_cerebras(api_key, model, image_pil, prompt):
+    """Cerebras Inference (OpenAI-compatible chat.completions + vision)"""
+    client = _get_client("cerebras", api_key)
+    image_pil, quality = _prepare_img_for_engine(image_pil, "cloud")
+    img_b64 = _img_to_jpeg_b64(image_pil, quality)
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                ],
+            }
+        ],
+        max_tokens=2048,
+        timeout=10,
+    )
+    return _parse_json_response(response.choices[0].message.content)
+
+
+
+def call_nvidia(api_key, model, image_pil, prompt):
+    """NVIDIA NIM (OpenAI-compatible chat.completions + vision)"""
+    client = _get_client("nvidia", api_key)
+    image_pil, quality = _prepare_img_for_engine(image_pil, "cloud")
+    img_b64 = _img_to_jpeg_b64(image_pil, quality)
+    nvidia_prompt = prompt + "\nReturn ONLY a raw JSON array. Do NOT use markdown, bullet points, or bold text. Start with [ and end with ]."
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": nvidia_prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                ],
+            }
+        ],
+        max_tokens=2048,
+        timeout=60,
+    )
+    return _parse_json_response(response.choices[0].message.content)
+
+
 ENGINE_CALLERS = {
     "gemini": call_gemini,
     "groq": call_groq,
@@ -1677,6 +1899,10 @@ ENGINE_CALLERS = {
     "openai": call_openai,
     "claude": call_claude,
     "grok": call_grok,
+    "hf": call_hf,
+    "together": call_together,
+    "cerebras": call_cerebras,
+    "nvidia": call_nvidia,
 }
 
 
@@ -1758,6 +1984,37 @@ def _bcp47_to_easyocr(bcp47: str) -> list:
         return ["ch_tra", "en"] if region.upper() in ("TW", "HK") else ["ch_sim", "en"]
     return [code]
 
+
+def _lang_label(s: str) -> str:
+    """提取語言字串括號內的名稱，如 'Japanese(日文)' → '日文'"""
+    m = re.search(r'\(([^)]+)\)', s)
+    return m.group(1) if m else s
+
+
+def _merge_ocr_lines(segments: list, y_thresh: float = 0.03) -> list:
+    """同行 OCR 片段（y 差 ≤ y_thresh）按 x 排序合併，從 x=0.02 開始顯示（整齊靠左）"""
+    if not segments:
+        return segments
+    by_y = sorted(segments, key=lambda s: float(s.get("y", 0)))
+    groups, cur = [], [by_y[0]]
+    for seg in by_y[1:]:
+        if abs(float(seg.get("y", 0)) - float(cur[-1].get("y", 0))) <= y_thresh:
+            cur.append(seg)
+        else:
+            groups.append(cur)
+            cur = [seg]
+    groups.append(cur)
+    merged = []
+    for grp in groups:
+        grp_x = sorted(grp, key=lambda s: float(s.get("x", 0)))
+        tw = " ".join(s.get("tw", "").strip() for s in grp_x if s.get("tw", "").strip())
+        if not tw:
+            continue
+        avg_y = sum(float(s.get("y", 0)) for s in grp) / len(grp)
+        merged.append({"tw": tw, "x": 0.02, "y": avg_y,
+                       "w": grp_x[0].get("w", 0.5), "h": grp_x[0].get("h", 0.05)})
+    return merged
+
 OLLAMA_TIMEOUT = 180  # 預設推理 timeout（秒）；大型視覺模型（如 QWEN2.5VL）需要較長時間
 
 
@@ -1776,25 +2033,46 @@ def _detect_ollama_vision_models() -> list:
 
 # 已知具備視覺能力的模型名稱關鍵字（小寫比對）
 OLLAMA_VISION_KEYWORDS = [
-    # LLaVA 系列
+    # LLaVA 系列（含 bakllava、llava-phi3、llava-llama3）
     "llava",
-    "bakllava",
-    # Meta vision
-    "llama3.2-vision",
-    # Qwen vision
-    "qwen2.5-vl",
-    "qwen2.5vl",  # 部分標籤可能省略 dash
-    "qwen3-vl",
-    "qwen3vl",
-    # Google Gemma 視覺系列（gemma3 部分版本、gemma4 全系列均支援視覺）
-    "gemma4",
-    "gemma3",
-    # 翻譯+視覺
-    "translategemma",
-    # MiniCPM 視覺
-    "minicpm-v",
+    # Meta Llama vision
+    "llama3.2-vision",   # Llama 3.2 Vision (11B/90B)
+    "llama4",            # Llama 4 全系列（Scout/Maverick，原生多模態）
+    # Qwen VL 系列（OLLAMA tag 有含 dash 與不含 dash 兩種寫法）
+    "qwen2-vl",          # Qwen2-VL
+    "qwen2.5-vl",        # Qwen2.5-VL（含 dash）
+    "qwen2.5vl",         # Qwen2.5-VL（OLLAMA tag 無 dash）
+    "qwen3-vl",          # Qwen3-VL
+    "qwen3vl",           # Qwen3-VL（無 dash 備用）
+    "qwen3.5",           # Qwen3.5 全系列（原生多模態）
+    # Google Gemma 視覺系列
+    "gemma3",            # Gemma 3（4B+ 支援視覺；1B 純文字）
+    "gemma4",            # Gemma 4 全系列（E2B/E4B/12B/26B/31B）
+    "translategemma",    # TranslateGemma（Gemma 3 視覺翻譯版）
+    "medgemma",          # MedGemma（醫療視覺）
+    "paligemma",         # PaliGemma 系列
+    # MiniCPM 視覺系列
+    "minicpm-v",         # MiniCPM-V（4.5、4.6 等）
+    "minicpm-o",         # MiniCPM-o 系列（視覺）
     # InternVL
-    "internvl",
+    "internvl",          # InternVL 全系列
+    # 輕量視覺模型
+    "moondream",         # Moondream 系列（1.8B）
+    "smolvlm",           # SmolVLM 系列（HuggingFace）
+    # DeepSeek 視覺
+    "deepseek-ocr",      # DeepSeek OCR（VLM 文字辨識）
+    # Granite 視覺
+    "granite3.2-vision", # IBM Granite 3.2 Vision
+    # Mistral/Ministral 視覺（3B/8B 均含視覺能力）
+    "mistral-small3.2",  # Mistral Small 3.2（含視覺）
+    "ministral",         # Ministral 系列
+    # Kimi 多模態
+    "kimi",              # Kimi K2.x（原生多模態）
+    # Phi-4 視覺
+    "phi4-multimodal",   # Phi-4 Multimodal
+    "phi4-vision",       # Phi-4 Vision 變體
+    # 通用兜底：名稱中含 vision 字樣的自訂 / 社群 VLM
+    "vision",
 ]
 
 
@@ -1807,19 +2085,23 @@ def _filter_vision_models(all_models: list) -> list:
     return result if result else all_models  # 沒有符合時回傳全部，避免清單變空
 
 
-def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOUT):
+def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOUT,
+                engine_type: str = "ollama"):
     """OLLAMA 原生 /api/chat 視覺呼叫。
     以獨立執行緒發送請求，主執行緒等待 timeout 秒；逾時則拋出 TimeoutError。
     """
 
-    image_pil, quality = _prepare_img_for_engine(image_pil, "ollama")
+    image_pil, quality = _prepare_img_for_engine(image_pil, engine_type)
     img_b64 = _img_to_jpeg_b64(image_pil, quality)
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt, "images": [img_b64]}],
         "stream": False,
-        "options": {"num_predict": 2048},
+        "options": {"num_predict": 2048, "temperature": 0},
     }
+    _thinking_keywords = {"minicpm", "qwen3", "deepseek-r1", "gemma4"}
+    if any(k in model.lower() for k in _thinking_keywords):
+        payload["think"] = False
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         f"{OLLAMA_BASE_URL}/api/chat", data=body, headers={"Content-Type": "application/json"}, method="POST"
@@ -1855,7 +2137,7 @@ def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOU
 
     result = json.loads(outcome)
     text = result.get("message", {}).get("content", "")
-    log(f"[OLLAMA] 原始回應前200字: {text[:200]!r}")
+    log(f"[OLLAMA] 原始回應前1000字: {text[:1000]!r}")
     return _parse_json_response(text)
 
 
@@ -2306,21 +2588,13 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
             return sorted(result)
 
         elif eng == "groq":
-            req = urllib.request.Request(
-                "https://api.groq.com/openai/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"}
-            )
-            with urllib.request.urlopen(req, timeout=10) as r:
-                data = json.loads(r.read().decode())
-            # VLM 名稱關鍵字：llava、vision、-vl、scout（llama4 vision）、maverick
-            vlm_keywords = {"llava", "vision", "-vl", "scout", "maverick", "llama-4", "minicpm", "qwen2-vl", "qwen2vl"}
+            client = _get_client("groq", api_key)
+            vlm_keywords = {"llava", "vision", "-vl", "scout", "maverick", "llama-4", "minicpm", "qwen2-vl", "qwen2vl", "qwen3"}
             exclude = {"whisper", "tts", "guard"}
             result = []
-            for m in data.get("data", []):
-                mid = m.get("id", "")
+            for m in client.models.list().data:
+                mid = m.id
                 if any(k in mid for k in exclude):
-                    continue
-                if m.get("context_window", 0) < 8000:
                     continue
                 if not any(k in mid.lower() for k in vlm_keywords):
                     continue
@@ -2335,10 +2609,21 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
             with urllib.request.urlopen(req, timeout=10) as r:
                 data = json.loads(r.read().decode())
             result = []
+            exclude = {"embed", "ocr", "voxtral", "moderation", "guard", "fim", "code",
+                       "labs", "magistral", "vibe"}
             for m in data.get("data", []):
+                mid = m.get("id", "")
+                mid_lower = mid.lower()
+                if any(k in mid_lower for k in exclude):
+                    continue
+                if "-3b" in mid_lower or "-8b" in mid_lower:
+                    continue
+                # mistral-medium 只保留 latest，其餘舊版過濾
+                if "mistral-medium" in mid_lower and "latest" not in mid_lower:
+                    continue
                 caps = m.get("capabilities", {})
                 if caps.get("vision") is True:
-                    result.append(m.get("id", ""))
+                    result.append(mid)
             return sorted(result)
 
         elif eng == "claude":
@@ -2366,6 +2651,73 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
         elif eng == "grok":
             return list(ENGINE_MODELS.get("grok", []))
 
+        elif eng == "hf":
+            return list(ENGINE_MODELS.get("hf", []))
+
+        elif eng == "cerebras":
+            req = urllib.request.Request(
+                "https://api.cerebras.ai/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read().decode())
+            vlm_keywords = {"gemma", "llava", "vision", "pixtral", "qwen2-vl", "qwen2vl", "minicpm"}
+            fetched_vlm = []
+            for m in data.get("data", []):
+                mid = m.get("id", "")
+                if any(k in mid.lower() for k in vlm_keywords):
+                    fetched_vlm.append(mid)
+            # 合併內建清單（補上 Preview 模型可能不在 API 清單的情況）
+            built_in = ENGINE_MODELS.get("cerebras", [])
+            combined = list(dict.fromkeys(fetched_vlm + list(built_in)))
+            return combined or list(built_in)
+
+        elif eng == "together":
+            req = urllib.request.Request(
+                "https://api.together.xyz/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read().decode())
+            exclude = {"embed", "rerank", "audio", "image-gen", "moderation"}
+            result = []
+            for m in data if isinstance(data, list) else data.get("data", []):
+                mid = m.get("id", "")
+                mtype = m.get("type", "").lower()
+                if any(k in mtype for k in exclude):
+                    continue
+                # 只保留有視覺能力的模型
+                caps = m.get("capabilities", m.get("config", {}))
+                if not (m.get("supports_vision") or
+                        "vision" in mid.lower() or
+                        "llava" in mid.lower() or
+                        "pixtral" in mid.lower() or
+                        "qwen2-vl" in mid.lower() or
+                        "vl" in mid.lower() or
+                        "scout" in mid.lower() or
+                        "maverick" in mid.lower()):
+                    continue
+                result.append(mid)
+            return sorted(result) or list(ENGINE_MODELS.get("together", []))
+
+        elif eng == "nvidia":
+            req = urllib.request.Request(
+                "https://integrate.api.nvidia.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"}
+            )
+            with urllib.request.urlopen(req, timeout=15) as r:
+                data = json.loads(r.read().decode())
+            vlm_keywords = {"vision", "-vl", "vl-", "llava", "pixtral", "paligemma", "multimodal"}
+            exclude = {"embed", "rerank", "whisper", "tts", "guard", "retrieval", "audio"}
+            result = []
+            for m in data.get("data", []):
+                mid = m.get("id", "")
+                if any(k in mid.lower() for k in exclude):
+                    continue
+                if any(k in mid.lower() for k in vlm_keywords):
+                    result.append(mid)
+            return sorted(result) or list(ENGINE_MODELS.get("nvidia", []))
+
     except Exception as e:
         log(f"[_fetch_models_from_api] {eng}: {e}")
     return []
@@ -2374,7 +2726,7 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.1.1")
+        self.root.title("LangForge  V1.5.1")
         _load_app_icon(self.root)
 
         global CURRENT_LANG
@@ -2432,6 +2784,7 @@ class LangForgeApp:
 
         menubar = tk.Menu(self.root)
 
+        menubar.add_command(label="🔀", command=self._toggle_ui_mode)
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label=S("menu_edit_platforms"), command=self._open_platform_editor)
         file_menu.add_separator()
@@ -2439,6 +2792,8 @@ class LangForgeApp:
         menubar.add_cascade(label=S("menu_file"), menu=file_menu)
 
         view_menu = tk.Menu(menubar, tearoff=0)
+        view_menu.add_command(label=S("menu_toggle_mode"), command=self._toggle_ui_mode)
+        view_menu.add_separator()
         lang_menu = tk.Menu(view_menu, tearoff=0)
         lang_menu.add_command(label=S("menu_lang_zh"), command=lambda: self._switch_lang("zh"))
         lang_menu.add_command(label=S("menu_lang_en"), command=lambda: self._switch_lang("en"))
@@ -2459,6 +2814,19 @@ class LangForgeApp:
         frm = ttk.Frame(root, padding=8)
         frm.pack(fill="both", expand=True)
 
+        # ── 跨模式共用 vars（簡易/進階共用同一份）──
+        _saved_targets_pre = self.config.get("target_windows", [])
+        self.title_var = tk.StringVar(value=_saved_targets_pre[0] if _saved_targets_pre else "")
+        _init_ollama_pre = self._ollama_models
+        self.ollama_model_var = tk.StringVar(
+            value=self.config.get("ollama_model", _init_ollama_pre[0] if _init_ollama_pre else "")
+        )
+        self.src_lang_var = tk.StringVar(value=self.config.get("src_lang", "Japanese(日文)"))
+        self.tgt_lang_var = tk.StringVar(value=self.config.get("tgt_lang", "Traditional Chinese(正體中文)"))
+        self.ollama_timeout_var = tk.StringVar(value=str(self.config.get("ollama_timeout", OLLAMA_TIMEOUT)))
+        self.vision_filter_var = tk.BooleanVar(value=self.config.get("ollama_vision_filter", True))
+        self.hotkey_var = tk.StringVar(value=self.config.get("hotkey", DEFAULT_HOTKEY))
+
         # ═══════════════════════════════════
         # Notebook（頁籤容器）
         # ═══════════════════════════════════
@@ -2477,6 +2845,128 @@ class LangForgeApp:
         nb.add(tab4, text=S("tab_history"))
         nb.add(tab5, text=S("tab_guide"))
         nb.add(tab6, text=S("tab_session"))
+        tab7 = ttk.Frame(nb, padding=8)
+        nb.add(tab7, text=S("tab_simple"))
+
+        # ── 本地引擎 ──
+        eng_lf = ttk.LabelFrame(tab7, text=S("lf_simple_engine"))
+        eng_lf.pack(fill="x", pady=(0, 6))
+        _init_ollama = _init_ollama_pre
+        self.simple_model_var = self.ollama_model_var
+        # 過濾開關列（與 Tab1 一致）
+        filter_row7 = ttk.Frame(eng_lf)
+        filter_row7.pack(fill="x", padx=6, pady=(4, 2))
+        ttk.Label(filter_row7, text=S("lbl_ollama_detected"), font=("Arial", 8), foreground="gray").pack(side="left")
+        ttk.Checkbutton(filter_row7, text=S("cb_vision_filter"),
+                        variable=self.vision_filter_var,
+                        command=self._on_vision_filter_toggle).pack(side="right")
+        _init_filtered = (
+            _filter_vision_models(_init_ollama) if self.vision_filter_var.get() else _init_ollama
+        )
+        self.simple_ollama_combo = ttk.Combobox(eng_lf, textvariable=self.ollama_model_var,
+                     values=_init_filtered, state="readonly", width=44)
+        self.simple_ollama_combo.pack(padx=6, pady=(0, 2), fill="x")
+        timeout_row = ttk.Frame(eng_lf)
+        timeout_row.pack(fill="x", padx=6, pady=(0, 4))
+        ttk.Label(timeout_row, text=S("lbl_ollama_timeout"), font=("Arial", 9)).pack(side="left")
+        ttk.Entry(timeout_row, textvariable=self.ollama_timeout_var, width=6).pack(side="left", padx=4)
+        ttk.Label(timeout_row, text=S("lbl_timeout_hint"), font=("Arial", 8), foreground="gray").pack(side="left")
+        redetect_row7 = ttk.Frame(eng_lf)
+        redetect_row7.pack(fill="x", padx=6, pady=(0, 4))
+        ttk.Button(redetect_row7, text=S("btn_refresh_ollama"),
+                   command=self._refresh_ollama_models, width=10).pack(side="right")
+
+        # ── 擷取設定 ──
+        cap_lf = ttk.LabelFrame(tab7, text=S("lf_simple_capture"))
+        cap_lf.pack(fill="x", pady=(0, 6))
+        ttk.Label(cap_lf, text=S("lbl_target_win"), font=("Arial", 9)).pack(anchor="w", padx=6, pady=(4, 0))
+        ttk.Combobox(cap_lf, textvariable=self.title_var,
+                     values=self.config.get("target_windows", []),
+                     state="normal", width=44).pack(padx=6, pady=(2, 2), fill="x")
+        simple_btn_row = ttk.Frame(cap_lf)
+        simple_btn_row.pack(anchor="w", padx=6, pady=(0, 4))
+        ttk.Button(simple_btn_row, text=S("btn_remove_target"), command=self._remove_target_window, width=10).pack(side="left", padx=(0, 4))
+        ttk.Button(simple_btn_row, text=S("btn_pick_window"),   command=self._start_pick_window,   width=12).pack(side="left", padx=(0, 4))
+        self.simple_pick_cancel_btn = ttk.Button(simple_btn_row, text=S("btn_cancel_pick"),
+                                                  command=self._cancel_pick_window, width=10, state="disabled")
+        self.simple_pick_cancel_btn.pack(side="left")
+        self.simple_pick_hint_label = ttk.Label(simple_btn_row, text="", foreground="orange", font=("Arial", 9))
+        self.simple_pick_hint_label.pack(side="left", padx=(8, 0))
+        lang_row7 = ttk.Frame(cap_lf)
+        lang_row7.pack(fill="x", padx=6, pady=(2, 0))
+        ttk.Label(lang_row7, text=S("lbl_src_lang"), width=10, font=("Arial", 9)).pack(side="left")
+        ttk.Combobox(lang_row7, textvariable=self.src_lang_var, values=GAME_LANGUAGES,
+                     state="readonly", width=38).pack(side="left", padx=2)
+        lang_row7b = ttk.Frame(cap_lf)
+        lang_row7b.pack(fill="x", padx=6, pady=(2, 4))
+        ttk.Label(lang_row7b, text=S("lbl_tgt_lang"), width=10, font=("Arial", 9)).pack(side="left")
+        ttk.Combobox(lang_row7b, textvariable=self.tgt_lang_var, values=TARGET_LANGUAGES,
+                     state="readonly", width=38).pack(side="left", padx=2)
+        hk_row7 = ttk.Frame(cap_lf)
+        hk_row7.pack(fill="x", padx=6, pady=(0, 4))
+        ttk.Label(hk_row7, text=S("lbl_hotkey"), font=("Arial", 9), width=16).pack(side="left")
+        hk_entry7 = ttk.Entry(hk_row7, textvariable=self.hotkey_var, width=14)
+        hk_entry7.pack(side="left", padx=4)
+        self._bind_hotkey_capture(hk_entry7, self.hotkey_var, "hotkey")
+
+        # ── 功能 ──
+        act_lf = ttk.LabelFrame(tab7, text=S("lf_simple_actions"))
+        act_lf.pack(fill="x", pady=(0, 6))
+        color_row = ttk.Frame(act_lf)
+        color_row.pack(fill="x", padx=6, pady=(4, 2))
+        ttk.Label(color_row, text=S("lbl_simple_color"), font=("Arial", 9)).pack(side="left")
+        self._simple_color_btns = {}
+        _color_map = [("white", S("color_white")), ("yellow", S("color_yellow")),
+                      ("red", S("color_red")), ("blue", S("color_blue")), ("green", S("color_green"))]
+        _cur_clr = self.config.get("simple_text_color", "white")
+        for color, label in _color_map:
+            btn = ttk.Button(color_row, text=f"{label}*" if color == _cur_clr else label,
+                             width=3, command=lambda c=color: self._set_simple_text_color(c))
+            btn.pack(side="left", padx=2)
+            self._simple_color_btns[color] = (btn, label)
+        # 底色選擇
+        bg_row = ttk.Frame(act_lf)
+        bg_row.pack(fill="x", padx=6, pady=(2, 2))
+        ttk.Label(bg_row, text=S("lbl_simple_bg_color"), font=("Arial", 9)).pack(side="left")
+        self._simple_bg_btns = {}
+        _cur_bg = self.config.get("simple_bg_color", "black")
+        for bg, label in [("black", S("color_bg_black")), ("white", S("color_bg_white"))]:
+            btn = ttk.Button(bg_row, text=f"{label}*" if bg == _cur_bg else label,
+                             width=5, command=lambda c=bg: self._set_simple_bg_color(c))
+            btn.pack(side="left", padx=2)
+            self._simple_bg_btns[bg] = (btn, label)
+        # 字級選擇
+        size_row = ttk.Frame(act_lf)
+        size_row.pack(fill="x", padx=6, pady=(2, 2))
+        ttk.Label(size_row, text=S("lbl_simple_font_size"), font=("Arial", 9)).pack(side="left")
+        self._simple_size_btns = {}
+        _cur_sz = self.config.get("simple_font_size", 3)
+        for level in range(1, 6):
+            btn = ttk.Button(size_row, text=f"{level}*" if level == _cur_sz else str(level),
+                             width=3, command=lambda l=level: self._set_simple_font_size(l))
+            btn.pack(side="left", padx=2)
+            self._simple_size_btns[level] = btn
+        btn_row7 = ttk.Frame(act_lf)
+        btn_row7.pack(fill="x", padx=6, pady=(2, 6))
+        self.simple_auto_var = tk.BooleanVar(value=False)
+        self._simple_trans_btn = ttk.Button(
+            btn_row7, text=S("btn_simple_translate"),
+            command=lambda: threading.Thread(target=self._simple_translate, daemon=True).start())
+        self._simple_trans_btn.pack(side="right")
+        ttk.Checkbutton(btn_row7, text=S("cb_simple_auto"), variable=self.simple_auto_var,
+                        command=self._on_simple_auto_toggle).pack(side="left")
+
+        # ── 簡易模式狀態列（與 Tab1 的 self.status 同步更新）──
+        simple_status_row = ttk.Frame(tab7)
+        simple_status_row.pack(side="bottom", fill="x", padx=4, pady=(4, 2))
+        self.simple_elapsed_label = ttk.Label(simple_status_row, text="", foreground="gray",
+                                              font=("Arial", 9), anchor="e", width=8)
+        self.simple_elapsed_label.pack(side="right")
+        self.simple_status = ttk.Label(simple_status_row, text=S("status_ready"), foreground="blue",
+                                       font=("Arial", 9), anchor="w")
+        self.simple_status.pack(side="left", fill="x", expand=True)
+        self.nb = nb
+        self._apply_ui_mode()
 
         # ══════════════════════════════════════════
         # Tab 1 — 翻譯操作
@@ -2656,7 +3146,6 @@ class LangForgeApp:
             filter_row = ttk.Frame(ollama_inner)
             filter_row.pack(fill="x", padx=6, pady=(4, 2))
             ttk.Label(filter_row, text=S("lbl_ollama_detected"), font=("Arial", 8), foreground="gray").pack(side="left")
-            self.vision_filter_var = tk.BooleanVar(value=self.config.get("ollama_vision_filter", True))
             ttk.Checkbutton(
                 filter_row,
                 text=S("cb_vision_filter"),
@@ -2668,10 +3157,10 @@ class LangForgeApp:
             _init_models = (
                 _filter_vision_models(self._ollama_models) if self.vision_filter_var.get() else self._ollama_models
             )
-            _saved_model = self.config.get("ollama_model", _init_models[0])
-            if _saved_model not in _init_models:
+            _saved_model = self.config.get("ollama_model", _init_models[0] if _init_models else "")
+            if _init_models and _saved_model not in _init_models:
                 _saved_model = _init_models[0]
-            self.ollama_model_var = tk.StringVar(value=_saved_model)
+            self.ollama_model_var.set(_saved_model)  # 更新已建立的共用 var
             self.ollama_combo = ttk.Combobox(
                 ollama_inner, textvariable=self.ollama_model_var, values=_init_models, state="readonly", width=44
             )
@@ -2680,7 +3169,7 @@ class LangForgeApp:
             timeout_row = ttk.Frame(ollama_inner)
             timeout_row.pack(fill="x", padx=6, pady=(2, 2))
             ttk.Label(timeout_row, text=S("lbl_ollama_timeout"), font=("Arial", 9)).pack(side="left")
-            self.ollama_timeout_var = tk.StringVar(value=str(self.config.get("ollama_timeout", OLLAMA_TIMEOUT)))
+            self.ollama_timeout_var.set(str(self.config.get("ollama_timeout", OLLAMA_TIMEOUT)))
             ttk.Entry(timeout_row, textvariable=self.ollama_timeout_var, width=6).pack(side="left", padx=4)
             ttk.Label(timeout_row, text=S("lbl_timeout_hint"), font=("Arial", 8), foreground="gray").pack(side="left")
             self.ollama_timeout_var.trace_add("write", lambda *_: self._debounce_save_config())
@@ -2692,9 +3181,7 @@ class LangForgeApp:
                 ollama_btn_row, text=S("btn_refresh_ollama"), command=self._refresh_ollama_models, width=10
             ).pack(side="right")
         else:
-            self.ollama_model_var = tk.StringVar(value="")
-            self.ollama_timeout_var = tk.StringVar(value=str(OLLAMA_TIMEOUT))
-            self.vision_filter_var = tk.BooleanVar(value=True)
+            self.ollama_timeout_var.set(str(OLLAMA_TIMEOUT))
             self.ollama_combo = None
 
         # 高度補齊 spacer（讓 local_frame 與 cloud_frame 等高，防止切換時下方 UI 跳動）
@@ -2713,7 +3200,8 @@ class LangForgeApp:
             font=("Arial", 8),
             foreground="gray",
         ).pack(anchor="w", padx=6, pady=(4, 2))
-        ttk.Label(ocr_inner, text="", font=("Arial", 8), foreground="steelblue").pack(anchor="w", padx=6, pady=(0, 4))
+        self.ocr_lang_label = ttk.Label(ocr_inner, text="", font=("Arial", 8), foreground="steelblue")
+        self.ocr_lang_label.pack(anchor="w", padx=6, pady=(0, 4))
         # 高度補齊 spacer
         ttk.Frame(self.ocr_frame, height=80).pack(fill="x")
 
@@ -2795,7 +3283,6 @@ class LangForgeApp:
 
         # 第一排：標題下拉式清單
         saved_targets = self.config.get("target_windows", [])
-        self.title_var = tk.StringVar(value=saved_targets[0] if saved_targets else "")
         self.target_combo = ttk.Combobox(target_lf, textvariable=self.title_var, width=38)
         self.target_combo["values"] = saved_targets
         if not saved_targets:
@@ -2833,16 +3320,17 @@ class LangForgeApp:
         src_row = ttk.Frame(lang_frame)
         src_row.pack(fill="x", pady=(6, 2), padx=6)
         ttk.Label(src_row, text=S("lbl_src_lang"), font=("Arial", 9), width=10).pack(side="left")
-        self.src_lang_var = tk.StringVar(value=self.config.get("src_lang", "Japanese(日文)"))
         src_combo = ttk.Combobox(src_row, textvariable=self.src_lang_var, values=GAME_LANGUAGES, state="readonly", width=38)
         src_combo.pack(side="left", padx=4)
+        self.src_lang_var.trace_add("write", lambda *_: self._update_ocr_lang_label())
 
         tgt_row = ttk.Frame(lang_frame)
         tgt_row.pack(fill="x", pady=(2, 6), padx=6)
         ttk.Label(tgt_row, text=S("lbl_tgt_lang"), font=("Arial", 9), width=10).pack(side="left")
-        self.tgt_lang_var = tk.StringVar(value=self.config.get("tgt_lang", "Traditional Chinese(正體中文)"))
         tgt_combo = ttk.Combobox(tgt_row, textvariable=self.tgt_lang_var, values=TARGET_LANGUAGES, state="readonly", width=38)
         tgt_combo.pack(side="left", padx=4)
+        self.tgt_lang_var.trace_add("write", lambda *_: self._update_ocr_lang_label())
+        self._update_ocr_lang_label()  # 補初始化：src/tgt 建好後才能正確顯示
 
         # ── 4. 文字排版模式 ──
         layout_lf = ttk.LabelFrame(tab2, text=S("lbl_layout").rstrip(":"))
@@ -2905,7 +3393,6 @@ class LangForgeApp:
         hk_row = ttk.Frame(hotkey_lf)
         hk_row.pack(fill="x", padx=6, pady=(6, 2))
         ttk.Label(hk_row, text=S("lbl_hotkey"), font=("Arial", 9), width=16).pack(side="left")
-        self.hotkey_var = tk.StringVar(value=self.config.get("hotkey", DEFAULT_HOTKEY))
         self.hotkey_entry = ttk.Entry(hk_row, textvariable=self.hotkey_var, width=14)
         self.hotkey_entry.pack(side="left", padx=4)
         self._bind_hotkey_capture(self.hotkey_entry, self.hotkey_var, "hotkey")
@@ -3421,6 +3908,9 @@ class LangForgeApp:
         self._stable_count = 0
         self._stable_last_hash = ""
         self._auto_trans_job = None
+        self._monitor_job = None
+        self._monitor_dot_idx = 0
+        self._last_status_color = "gray"
 
         # 視窗位置快取（避免每次 polling 都呼叫 EnumWindows 與 geometry）
         self._mesen_cache_rect = None  # (left,top,right,bottom) 上次找到的位置
@@ -3645,6 +4135,7 @@ class LangForgeApp:
         self._session_capture_fail_cnt = 0
 
         self._session_status_label.config(text=S("session_recording"), foreground="red")
+        self._start_monitor_loop()
 
         self._playback_auto_open_job = self.root.after(PLAYBACK_DELAY_SECONDS * 1000, self._open_playback_window)
         self._session_start_time = time.time()
@@ -3750,23 +4241,26 @@ class LangForgeApp:
                     if self._session_stable_cnt >= SESSION_STABLE_COUNT:
                         img_hash = hashlib.md5(image_pil.tobytes()).hexdigest()
                         if img_hash != self._session_last_hash and not self._session_translating:
-                            self._session_last_hash = img_hash
-                            self._session_stable_cnt = 0
-                            self._session_translating = True
-                            seq_to_translate = self._session_seq
-                            snap = {
-                                "mode":          self.engine_mode_var.get(),
-                                "src_lang":      self.src_lang_var.get(),
-                                "tgt_lang":      self.tgt_lang_var.get(),
-                                "eng":           self.engine_var.get(),
-                                "api_key":       self.api_entry.get().strip(),
-                                "model":         self.model_var.get(),
-                                "ollama_model":  self.ollama_model_var.get() if hasattr(self, "ollama_model_var") else "",
-                                "ollama_timeout": self.ollama_timeout_var.get() if hasattr(self, "ollama_timeout_var") else str(OLLAMA_TIMEOUT),
-                            }
-                            threading.Thread(
-                                target=self._session_translate, args=(image_pil, seq_to_translate, snap), daemon=True
-                            ).start()
+                            now = time.time()
+                            if now - getattr(self, "_session_last_trans_time", 0) >= 3.0:
+                                self._session_last_hash = img_hash
+                                self._session_stable_cnt = 0
+                                self._session_translating = True
+                                self._session_last_trans_time = now
+                                seq_to_translate = self._session_seq
+                                snap = {
+                                    "mode":          self.engine_mode_var.get(),
+                                    "src_lang":      self.src_lang_var.get(),
+                                    "tgt_lang":      self.tgt_lang_var.get(),
+                                    "eng":           self.engine_var.get(),
+                                    "api_key":       self.api_entry.get().strip(),
+                                    "model":         self._model_id(),
+                                    "ollama_model":  self.ollama_model_var.get() if hasattr(self, "ollama_model_var") else "",
+                                    "ollama_timeout": self.ollama_timeout_var.get() if hasattr(self, "ollama_timeout_var") else str(OLLAMA_TIMEOUT),
+                                }
+                                threading.Thread(
+                                    target=self._session_translate, args=(image_pil, seq_to_translate, snap), daemon=True
+                                ).start()
                 self._session_prev_gray = gray
         except Exception as e:
             log(f"場次截圖失敗: {e}")
@@ -3784,6 +4278,13 @@ class LangForgeApp:
 
             if mode == "ocr":
                 # ── OCR 模式：EasyOCR + Google 翻譯（縮放 + 並行）──
+                if LANG_TO_BCP47.get(src_lang) == "auto":
+                    self._set_status(S("status_ocr_src_auto"), "red")
+                    return
+                self._set_status(
+                    f"{S('status_ocr_running')} | {_lang_label(src_lang)} → {_lang_label(tgt_lang)}",
+                    "orange"
+                )
                 import easyocr, numpy as np
 
                 ocr_langs = _bcp47_to_easyocr(LANG_TO_BCP47.get(src_lang, "ja"))
@@ -3819,6 +4320,7 @@ class LangForgeApp:
                         "h": round((max(ys) - min(ys)) / orig_h, 4),
                     })
                 model = "OCR+GoogleTranslate"
+                result = _merge_ocr_lines(result)
 
             elif mode == "local":
                 # ── OLLAMA 本地模式 ──
@@ -3842,9 +4344,11 @@ class LangForgeApp:
                 model   = snap.get("model",   self.model_var.get())
                 prompt = build_translate_prompt(src_lang, tgt_lang)
                 caller = ENGINE_CALLERS[eng]
+                self._set_status(S("status_analyzing").format(engine=ENGINE_DISPLAY.get(eng, eng), model=model), "orange")
                 result = caller(api_key, model, image_pil, prompt)
 
             if isinstance(result, list) and result:
+                self._set_status(S("status_done"), "green")
                 trans_json = json.dumps(result, ensure_ascii=False)
                 self._db_conn.execute(
                     "UPDATE frames SET translation=? WHERE session_id=? AND seq=?", (trans_json, self._session_id, seq)
@@ -3859,8 +4363,11 @@ class LangForgeApp:
                         self.root.after(0, self._refresh_quota)
 
                     self.root.after(0, _update_quota)
+            else:
+                self._set_status(S("status_no_text_found"), "blue")
         except Exception as e:
             log(f"場次翻譯失敗: seq={seq}, {e}")
+            self._set_status(S("status_api_fail").format(msg=str(e)[:60]), "red")
             self.root.after(0, lambda s=seq, err=str(e)[:40]: self._session_status_label.config(
                 text=S("session_warn_api_fail").format(seq=s, err=err), foreground="orange"))
         finally:
@@ -5028,6 +5535,7 @@ class LangForgeApp:
             self._stable_last_hash = ""
             self._position_polling_paused = True
             self._stable_check_loop()
+            self._start_monitor_loop()
             # 自動翻譯開啟時停用三個手動按鈕
             for btn in ("btn_capture", "btn_guide", "btn_file"):
                 if hasattr(self, btn):
@@ -5135,6 +5643,8 @@ class LangForgeApp:
                 break
         self._update_queue_label(0)
         if cleared > 0:
+            LAST_REQUEST_TIME[self._model_id()] = 0
+            self._update_cooldown_display()
             log(f"已清空佇列，移除 {cleared} 筆待處理任務")
             self._set_status(S("status_queue_cleared").format(n=cleared), "orange")
         else:
@@ -5149,7 +5659,7 @@ class LangForgeApp:
         task.setdefault("snap_tgt_lang",     self.tgt_lang_var.get())
         task.setdefault("snap_engine_mode",  self.engine_mode_var.get())
         task.setdefault("snap_engine",       self.engine_var.get())
-        task.setdefault("snap_model",        self.model_var.get())
+        task.setdefault("snap_model",        self._model_id())
         task.setdefault("snap_api_key",      self.api_entry.get().strip())
         task.setdefault("snap_ollama_model", self.ollama_model_var.get() if hasattr(self, "ollama_model_var") else "")
         task.setdefault("snap_ollama_timeout", self.ollama_timeout_var.get() if hasattr(self, "ollama_timeout_var") else str(OLLAMA_TIMEOUT))
@@ -5162,6 +5672,8 @@ class LangForgeApp:
             self.root.after(0, lambda q=qsize: self._update_queue_label(q))
             if qsize >= REQUEST_QUEUE_MAXSIZE:
                 self._set_status(S("status_queue_full"), "orange")
+            else:
+                self._set_status(S("status_queue_waiting").format(n=qsize), "orange")
             return True
         except queue.Full:
             self._set_status(S("status_queue_full"), "orange")
@@ -5282,6 +5794,19 @@ class LangForgeApp:
             self.config["platform"] = self.platform_var.get()
             self.config["platform_mode"] = self.platform_mode_var.get()
             self.config["engine_mode"] = self.engine_mode_var.get()
+            # 儲存裁切頂部
+            try:
+                self.config["crop_top"] = max(0, int(self.crop_top_var.get()))
+            except (ValueError, AttributeError):
+                pass
+            # 儲存目標視窗標題（當前選取移至清單最前）
+            cur_title = self.title_var.get().strip()
+            if cur_title:
+                targets = list(self.config.get("target_windows", []))
+                if cur_title in targets:
+                    targets.remove(cur_title)
+                targets.insert(0, cur_title)
+                self.config["target_windows"] = targets
             # 儲存主視窗實際座標（供下次啟動還原位置）
             self.config["main_win_x"] = self.root.winfo_x()
             self.config["main_win_y"] = self.root.winfo_y()
@@ -5391,8 +5916,30 @@ class LangForgeApp:
         def _update():
             if hasattr(self, "status") and self.status.winfo_exists():
                 self.status.config(text=simplified, foreground=resolved)
+            if hasattr(self, "simple_status") and self.simple_status.winfo_exists():
+                self.simple_status.config(text=simplified, foreground=resolved)
 
         self.root.after(0, _update)
+        self._last_status_color = color
+
+    _MONITOR_DOTS = ["監視中 ●", "監視中 ○"]
+
+    def _start_monitor_loop(self):
+        if self._monitor_job:
+            self.root.after_cancel(self._monitor_job)
+        self._monitor_dot_idx = 0
+        self._monitor_loop()
+
+    def _monitor_loop(self):
+        active = self.auto_trans_var.get() or getattr(self, "_session_translating", False)
+        if not active:
+            self._monitor_job = None
+            return
+        if self._last_status_color == "gray":
+            dot = self._MONITOR_DOTS[self._monitor_dot_idx % len(self._MONITOR_DOTS)]
+            self._monitor_dot_idx += 1
+            self._set_status(dot, "gray")
+        self._monitor_job = self.root.after(1200, self._monitor_loop)
 
     def _start_elapsed_timer(self):
         if getattr(self, "_elapsed_timer_id", None):
@@ -5412,6 +5959,8 @@ class LangForgeApp:
             return
         secs = int(time.time() - self._trans_start_time)
         self.elapsed_label.config(text=f"{secs}s", foreground="steelblue")
+        if hasattr(self, "simple_elapsed_label") and self.simple_elapsed_label.winfo_exists():
+            self.simple_elapsed_label.config(text=f"{secs}s", foreground="steelblue")
         self._elapsed_timer_id = self.root.after(1000, self._elapsed_tick)
 
     def _stamp_elapsed(self):
@@ -5426,6 +5975,8 @@ class LangForgeApp:
         def _freeze(s=secs):
             if hasattr(self, "elapsed_label") and self.elapsed_label.winfo_exists():
                 self.elapsed_label.config(text=f"{s}s", foreground="steelblue")
+            if hasattr(self, "simple_elapsed_label") and self.simple_elapsed_label.winfo_exists():
+                self.simple_elapsed_label.config(text=f"{s}s", foreground="steelblue")
 
         self.root.after(0, _freeze)
 
@@ -5501,8 +6052,10 @@ class LangForgeApp:
 
             def _apply_fetched(fetched):
                 if fetched:
-                    custom = self.config.get("custom_models", {}).get(eng, [])
-                    all_models = fetched + [m for m in custom if m not in fetched]
+                    custom_key = f"custom_models_{eng}"
+                    custom = self.config.get(custom_key, [])
+                    custom_only = [m for m in custom if m not in fetched]
+                    all_models = fetched + custom_only
                     cached = self.config.setdefault("cached_models", {})
                     cached[eng] = fetched
                     # 方案2：不在 MODEL_DAILY_LIMITS 且非學習到 limit=0 的新模型標記為 -1（未知）
@@ -5520,13 +6073,18 @@ class LangForgeApp:
                     save_config(self.config)
                 else:
                     built_in = list(ENGINE_MODELS.get(eng, []))
-                    custom = self.config.get("custom_models", {}).get(eng, [])
-                    all_models = built_in + [m for m in custom if m not in built_in]
-                    self._set_status(S("status_fetch_models_failed").format(engine=ENGINE_DISPLAY.get(eng, eng)), "red")
-                self.model_combo["values"] = all_models
+                    custom_key = f"custom_models_{eng}"
+                    custom_only = [m for m in self.config.get(custom_key, []) if m not in built_in]
+                    all_models = built_in + custom_only
+                    self._set_status(S("status_fetch_models_failed").format(engine=ENGINE_DISPLAY.get(eng, eng)), "blue")
+                display_models = list(dict.fromkeys(
+                    all_models[:len(fetched) if fetched else len(all_models)] +
+                    [f"[自加] {m}" for m in all_models[len(fetched) if fetched else len(all_models):]]
+                ))
+                self.model_combo["values"] = display_models
                 current = self.model_var.get()
-                if current not in all_models:
-                    self.model_var.set(all_models[0] if all_models else "")
+                if current not in display_models:
+                    self.model_var.set(display_models[0] if display_models else "")
                 self._refresh_quota()
                 self._refresh_quota_table()
                 if fetched:
@@ -5538,8 +6096,8 @@ class LangForgeApp:
             cached = self.config.get("cached_models", {}).get(eng, [])
             built_in = list(ENGINE_MODELS.get(eng, []))
             base = cached if cached else built_in
-            custom = self.config.get("custom_models", {}).get(eng, [])
-            all_models = base + [m for m in custom if m not in base]
+            custom_only = [m for m in self.config.get(f"custom_models_{eng}", []) if m not in base]
+            all_models = list(dict.fromkeys(base + [f"[自加] {m}" for m in custom_only]))
             self.model_combo["values"] = all_models
             current = self.model_var.get()
             if current not in all_models:
@@ -5571,7 +6129,7 @@ class LangForgeApp:
         self._set_status(S("status_model_added").format(model=model_name), "green")
 
     def _remove_custom_model(self):
-        model_name = self.model_var.get()
+        model_name = self._model_id()
         eng = self.engine_var.get()
         custom_key = f"custom_models_{eng}"
         custom_list = self.config.get(custom_key, [])
@@ -5596,7 +6154,13 @@ class LangForgeApp:
         built_in = list(ENGINE_MODELS.get(eng, []))
         base = cached if cached else built_in
         custom = list(self.config.get(f"custom_models_{eng}", []))
-        return base + [m for m in custom if m not in base]
+        custom_only = [m for m in custom if m not in base]
+        return list(dict.fromkeys(base + [f"[自加] {m}" for m in custom_only]))
+
+    def _model_id(self, raw=None):
+        """回傳實際 model ID，剝除 [自加] 前綴。"""
+        m = raw if raw is not None else self.model_var.get()
+        return m[5:] if m.startswith("[自加] ") else m
 
     def _refresh_quota(self):
         global CURRENT_LANG
@@ -5970,6 +6534,8 @@ class LangForgeApp:
             self.ollama_combo["values"] = filtered
             if self.ollama_model_var.get() not in filtered:
                 self.ollama_model_var.set(filtered[0] if filtered else "")
+        if hasattr(self, "simple_ollama_combo") and self.simple_ollama_combo:
+            self.simple_ollama_combo["values"] = filtered
         count = len(new_models)
         self._set_status(
             f"{'偵測到' if CURRENT_LANG != 'en' else 'Detected'} {count} {'個 OLLAMA 模型' if CURRENT_LANG != 'en' else 'OLLAMA model(s)'}",
@@ -5995,6 +6561,8 @@ class LangForgeApp:
         self.config["ollama_vision_filter"] = filtered
         new_list = _filter_vision_models(self._ollama_models) if filtered else self._ollama_models
         self.ollama_combo["values"] = new_list
+        if hasattr(self, "simple_ollama_combo") and self.simple_ollama_combo:
+            self.simple_ollama_combo["values"] = new_list
         # 若目前選取的模型不在新清單中，自動切到第一個
         if self.ollama_model_var.get() not in new_list:
             self.ollama_model_var.set(new_list[0])
@@ -6019,6 +6587,245 @@ class LangForgeApp:
         save_config(self.config)
         self._apply_engine_mode(animate=True)
 
+    def _update_ocr_lang_label(self):
+        if not hasattr(self, "ocr_lang_label"):
+            return
+        if not hasattr(self, "src_lang_var") or not hasattr(self, "tgt_lang_var"):
+            return
+        if self.engine_mode_var.get() != "ocr":
+            self.ocr_lang_label.config(text="")
+            return
+        src = _lang_label(self.src_lang_var.get())
+        tgt = _lang_label(self.tgt_lang_var.get())
+        is_auto = LANG_TO_BCP47.get(self.src_lang_var.get()) == "auto"
+        if is_auto:
+            self.ocr_lang_label.config(
+                text=f"⚠ 遊戲語言: {src}（OCR 不支援，請改為指定語言）",
+                foreground="red"
+            )
+        else:
+            self.ocr_lang_label.config(
+                text=f"遊戲語言: {src}　→　譯文: {tgt}",
+                foreground="steelblue"
+            )
+
+    # ── 簡易模式方法 ──────────────────────────────────────────
+
+    def _ensure_simple_win(self):
+        """確保輸出視窗存在，不存在時建立。"""
+        if getattr(self, "_simple_win", None):
+            try:
+                if self._simple_win.winfo_exists():
+                    return
+            except Exception:
+                pass
+        win = tk.Toplevel(self.root)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        try:
+            import ctypes.wintypes
+            r = ctypes.wintypes.RECT()
+            ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0)
+            taskbar_top = r.bottom
+        except Exception:
+            taskbar_top = sh - 40
+        win_h = 150
+        win_w = int(sw * 0.8)
+        win_x = int(sw * 0.1)
+        self._simple_win_default_geom = f"{win_w}x{win_h}+{win_x}+{taskbar_top - win_h}"
+        win.geometry(self._simple_win_default_geom)
+        bg = self.config.get("simple_bg_color", "black")
+        fg_x = "white" if bg == "black" else "black"
+        win.configure(bg=bg)
+        color = self.config.get("simple_text_color", "white")
+        self._simple_lbl = tk.Label(win, text="", bg=bg, fg=color,
+                                    font=("Arial", 14), justify="center", anchor="center",
+                                    wraplength=win_w - 40)
+        self._simple_lbl.pack(fill="both", expand=True, padx=10, pady=5)
+        self._simple_close_btn = tk.Button(win, text="✕", bg=bg, fg=fg_x, relief="flat",
+                              font=("Arial", 11), bd=0, padx=4,
+                              command=lambda: self._simple_win.destroy())
+        self._simple_close_btn.place(relx=1.0, y=2, anchor="ne", x=-2)
+        for w in (win, self._simple_lbl):
+            w.bind("<ButtonPress-1>", self._simple_drag_start)
+            w.bind("<B1-Motion>", self._simple_drag_move)
+            w.bind("<Double-Button-1>", self._simple_reset_pos)
+        self._simple_win = win
+
+    def _simple_drag_start(self, e):
+        self._sdx, self._sdy = e.x_root - self._simple_win.winfo_x(), e.x_root - self._simple_win.winfo_x()
+        self._sdx = e.x_root - self._simple_win.winfo_x()
+        self._sdy = e.y_root - self._simple_win.winfo_y()
+
+    def _simple_drag_move(self, e):
+        self._simple_win.geometry(f"+{e.x_root - self._sdx}+{e.y_root - self._sdy}")
+
+    def _simple_reset_pos(self, _e=None):
+        if getattr(self, "_simple_win_default_geom", None):
+            self._simple_win.geometry(self._simple_win_default_geom)
+
+    def _show_simple_result(self, text: str):
+        self.root.after(0, self._ensure_simple_win)
+        def _upd(t=text):
+            if not getattr(self, "_simple_lbl", None):
+                return
+            try:
+                win_h = self._simple_win.winfo_height() or 150
+                level = self.config.get("simple_font_size", 3)
+                max_size = _FONT_LEVEL_SIZES.get(level, 24)
+                for size in range(max_size, 7, -1):
+                    self._simple_lbl.config(text=t, font=("Arial", size))
+                    self._simple_lbl.update_idletasks()
+                    if self._simple_lbl.winfo_reqheight() <= win_h:
+                        break
+            except Exception:
+                pass
+        self.root.after(20, _upd)
+
+    def _set_simple_text_color(self, color: str):
+        self.config["simple_text_color"] = color
+        save_config(self.config)
+        if getattr(self, "_simple_lbl", None):
+            try:
+                self._simple_lbl.config(fg=color)
+            except Exception:
+                pass
+        for c, (btn, label) in getattr(self, "_simple_color_btns", {}).items():
+            try:
+                btn.config(text=f"{label}*" if c == color else label)
+            except Exception:
+                pass
+
+    def _set_simple_bg_color(self, bg: str):
+        self.config["simple_bg_color"] = bg
+        save_config(self.config)
+        fg_x = "white" if bg == "black" else "black"
+        if getattr(self, "_simple_lbl", None):
+            try:
+                self._simple_lbl.config(bg=bg)
+                self._simple_win.configure(bg=bg)
+                self._simple_close_btn.config(bg=bg, fg=fg_x)
+            except Exception:
+                pass
+        for b, (btn, label) in getattr(self, "_simple_bg_btns", {}).items():
+            try:
+                btn.config(text=f"{label}*" if b == bg else label)
+            except Exception:
+                pass
+
+    def _set_simple_font_size(self, level: int):
+        self.config["simple_font_size"] = level
+        save_config(self.config)
+        for l, btn in getattr(self, "_simple_size_btns", {}).items():
+            try:
+                btn.config(text=f"{l}*" if l == level else str(l))
+            except Exception:
+                pass
+
+    def _simple_translate(self, image_pil=None):
+        log("[簡易模式] 單次翻譯觸發")
+        self._simple_translating = True
+        try:
+            if image_pil is None:
+                image_pil = self._try_capture()
+            if image_pil is None:
+                self._set_status("找不到目標視窗", "red")
+                return
+            model = self.simple_model_var.get() if hasattr(self, "simple_model_var") else ""
+            if not model:
+                self._set_status("請選擇本地模型", "red")
+                return
+            src_lang = self.src_lang_var.get()
+            tgt_lang = self.tgt_lang_var.get()
+            prompt = build_simple_prompt(src_lang, tgt_lang)
+            self._set_status(S("status_analyzing").format(engine="OLLAMA", model=model), "orange")
+            self._start_elapsed_timer()
+            try:
+                timeout = int(self.ollama_timeout_var.get() or OLLAMA_TIMEOUT)
+            except (ValueError, AttributeError):
+                timeout = OLLAMA_TIMEOUT
+            try:
+                result = call_ollama(model, image_pil, prompt, timeout=timeout,
+                                     engine_type="simple")
+            except Exception as e:
+                self._set_status(S("status_api_fail").format(msg=str(e)[:60]), "red")
+                self._stamp_elapsed()
+                return
+            if result:
+                sentences = [s.get("tw", "") for s in result if isinstance(s, dict) and s.get("tw", "").strip()]
+                self._show_simple_result(_build_simple_display_text(result))
+                self._set_status(S("status_done"), "green")
+                self._stamp_elapsed()
+            else:
+                self._show_simple_result("")
+                self._set_status(S("status_no_text_found"), "gray")
+                self._stamp_elapsed()
+        finally:
+            self._simple_translating = False
+
+    def _on_simple_auto_toggle(self):
+        on = self.simple_auto_var.get()
+        if hasattr(self, "_simple_trans_btn"):
+            self._simple_trans_btn.config(state="disabled" if on else "normal")
+        if on:
+            self._simple_last_hash = ""
+            self._simple_last_trans_time = 0.0
+            self._simple_translating = False
+            self._simple_auto_loop()
+        else:
+            if getattr(self, "_simple_auto_job", None):
+                self.root.after_cancel(self._simple_auto_job)
+                self._simple_auto_job = None
+
+    def _simple_auto_loop(self):
+        if not getattr(self, "simple_auto_var", None) or not self.simple_auto_var.get():
+            self._simple_auto_job = None
+            return
+        try:
+            img = self._try_capture()
+            if img:
+                h = hashlib.md5(img.tobytes()).hexdigest()
+                if h != getattr(self, "_simple_last_hash", ""):
+                    if not getattr(self, "_simple_translating", False):
+                        now = time.time()
+                        if now - getattr(self, "_simple_last_trans_time", 0.0) >= 3.0:
+                            self._simple_last_hash = h
+                            self._simple_last_trans_time = now
+                            threading.Thread(target=self._simple_translate, args=(img,), daemon=True).start()
+        except Exception:
+            pass
+        self._simple_auto_job = self.root.after(500, self._simple_auto_loop)
+
+    # ─────────────────────────────────────────────────────────
+
+    def _toggle_ui_mode(self):
+        cur = self.config.get("ui_mode", "advanced")
+        self.config["ui_mode"] = "simple" if cur == "advanced" else "advanced"
+        save_config(self.config)
+        self._apply_ui_mode()
+
+    def _apply_ui_mode(self):
+        if not hasattr(self, "nb"):
+            return
+        mode = self.config.get("ui_mode", "advanced")
+        adv = "normal" if mode == "advanced" else "hidden"
+        sim = "hidden" if mode == "advanced" else "normal"
+        for i in range(6):
+            self.nb.tab(i, state=adv)
+        self.nb.tab(6, state=sim)
+        self.nb.select(6 if mode == "simple" else 0)
+        if mode == "advanced":
+            if getattr(self, "simple_auto_var", None):
+                self.simple_auto_var.set(False)
+            if getattr(self, "_simple_win", None):
+                try:
+                    self._simple_win.destroy()
+                except Exception:
+                    pass
+                self._simple_win = None
+
     def _apply_engine_mode(self, animate: bool = True):
         mode = self.engine_mode_var.get()
         ocr_frame = getattr(self, "ocr_frame", None)
@@ -6035,6 +6842,7 @@ class LangForgeApp:
         else:
             if ocr_frame:
                 ocr_frame.pack(fill="x")
+        self._update_ocr_lang_label()
 
     def _update_indicators(self):
         if not hasattr(self, "_ind_auto"):
@@ -6061,6 +6869,8 @@ class LangForgeApp:
             self.root.after_cancel(self._pick_countdown_id)
         self.pick_window_btn.config(state="disabled")
         self.pick_cancel_btn.config(state="normal")
+        if hasattr(self, "simple_pick_cancel_btn"):
+            self.simple_pick_cancel_btn.config(state="normal")
         self._pick_window_tick(5)
 
     def _cancel_pick_window(self):
@@ -6070,14 +6880,20 @@ class LangForgeApp:
         self.pick_window_btn.config(state="normal")
         self.pick_cancel_btn.config(state="disabled")
         self.pick_hint_label.config(text="", foreground="orange")
+        if hasattr(self, "simple_pick_cancel_btn"):
+            self.simple_pick_cancel_btn.config(state="disabled")
+        if hasattr(self, "simple_pick_hint_label"):
+            self.simple_pick_hint_label.config(text="", foreground="orange")
         log("[PickWindow] 已取消")
 
     def _pick_window_tick(self, remaining: int):
         if remaining > 0:
-            self.pick_hint_label.config(text=S("lbl_pick_hint") + f" ({remaining})", foreground="orange")
+            hint = S("lbl_pick_hint") + f" ({remaining})"
+            self.pick_hint_label.config(text=hint, foreground="orange")
+            if hasattr(self, "simple_pick_hint_label"):
+                self.simple_pick_hint_label.config(text=hint, foreground="orange")
             self._pick_countdown_id = self.root.after(1000, self._pick_window_tick, remaining - 1)
         else:
-            # 時間到，抓前景視窗
             try:
                 hwnd = win32gui.GetForegroundWindow()
                 title = win32gui.GetWindowText(hwnd).strip()
@@ -6085,7 +6901,6 @@ class LangForgeApp:
                 title = ""
 
             if title and title != self.root.title():
-                # 自動加入清單並選取
                 targets = list(self.config.get("target_windows", []))
                 if title not in targets:
                     targets.append(title)
@@ -6094,13 +6909,21 @@ class LangForgeApp:
                 self.target_combo["values"] = targets
                 self.title_var.set(title)
                 self.target_combo.config(foreground="")
-                self.pick_hint_label.config(text=f"✓ {title}", foreground="green")
+                hint_ok = f"✓ {title}"
+                self.pick_hint_label.config(text=hint_ok, foreground="green")
+                if hasattr(self, "simple_pick_hint_label"):
+                    self.simple_pick_hint_label.config(text=hint_ok, foreground="green")
                 log(f"[PickWindow] 已選取: {title}")
             else:
-                self.pick_hint_label.config(text=S("status_no_win_detect"), foreground="red")
+                msg = S("status_no_win_detect")
+                self.pick_hint_label.config(text=msg, foreground="red")
+                if hasattr(self, "simple_pick_hint_label"):
+                    self.simple_pick_hint_label.config(text=msg, foreground="red")
 
             self.pick_window_btn.config(state="normal")
             self.pick_cancel_btn.config(state="disabled")
+            if hasattr(self, "simple_pick_cancel_btn"):
+                self.simple_pick_cancel_btn.config(state="disabled")
             self._pick_countdown_id = None
 
     def _add_target_window(self):
@@ -6785,7 +7608,14 @@ class LangForgeApp:
         platform   = task.get("snap_platform",      self.platform_var.get().strip())
 
         # ── Step1：EasyOCR 辨識 ──
-        self._set_status(S("status_ocr_running"), "orange")
+        if LANG_TO_BCP47.get(src_lang) == "auto":
+            self._set_status(S("status_ocr_src_auto"), "red")
+            self._stamp_elapsed()
+            return
+        self._set_status(
+            f"{S('status_ocr_running')} | {_lang_label(src_lang)} → {_lang_label(tgt_lang)}",
+            "orange"
+        )
         try:
             import easyocr
         except ImportError:
@@ -6866,9 +7696,10 @@ class LangForgeApp:
                 platform=platform,
             )
 
-        self.root.after(0, lambda _s=segments, _img=image_pil: self.render(_s, _img, source))
+        self.root.after(0, lambda _s=_merge_ocr_lines(segments), _img=image_pil: self.render(_s, _img, source))
 
     def _do_translate(self, image_pil, source="file", win_title="", **task):
+        log(f"[進階模式] 翻譯觸發 source={source}")
         # 任務實際開始執行時重置計時器（在主執行緒透過 after 同步執行）
         if threading.current_thread() is threading.main_thread():
             self._start_elapsed_timer()
@@ -6966,6 +7797,7 @@ class LangForgeApp:
 
         self._set_status(S("status_analyzing").format(engine=ENGINE_DISPLAY[eng], model=model), "orange")
 
+        _api_call_failed = False
         try:
             caller = ENGINE_CALLERS[eng]
             res = caller(api_key, model, image_pil, translate_prompt)
@@ -6983,6 +7815,7 @@ class LangForgeApp:
                 log(f"ValueError: {err_msg}")
                 self._set_status(S("status_error").format(msg=err_msg[:60]), "red")
             res = []
+            _api_call_failed = True
 
         except Exception as e:
             err_str = str(e)
@@ -7030,6 +7863,7 @@ class LangForgeApp:
                 else:
                     retry_sec = self._parse_429_retry_delay(err_str)
                     if retry_sec:
+                        LAST_REQUEST_TIME[model] = time.time() + retry_sec
                         self._set_status(S("status_429_wait").format(sec=retry_sec), "red")
                     else:
                         self._set_status(S("status_429"), "red")
@@ -7052,6 +7886,7 @@ class LangForgeApp:
             else:
                 self._set_status(S("status_api_fail").format(msg=err_str[:60]), "red")
             res = []
+            _api_call_failed = True
 
         if res:
             self.last_res = res
@@ -7086,6 +7921,8 @@ class LangForgeApp:
                 )
         else:
             self._stamp_elapsed()
+            if not _api_call_failed:
+                self._set_status(S("status_no_text_found"), "gray")
 
         self.root.after(0, lambda _r=res, _img=image_pil, _s=source: self.render(_r, _img, _s))
 
@@ -7511,7 +8348,7 @@ class LangForgeApp:
         # ── 方向E：render 前合併相近 segment（防疊字預處理）──
         # x_thresh=0.03：同欄判斷；y_thresh=0.04：同行判斷（對話框多行間距通常 >0.05）
         raw_dicts = [{"tw": tw, "x": sx, "y": sy, "w": 0.1, "h": 0.05} for tw, sx, sy in items]
-        merged = _merge_segments(raw_dicts, x_thresh=0.03, y_thresh=0.04)
+        merged = _merge_segments(raw_dicts, x_thresh=0.03, y_thresh=0.02)
         items = [(m["tw"].replace("\n", " "), m["x"], m["y"]) for m in merged]
 
         items.sort(key=lambda t: t[2])  # 依 sy 升序：y 小的（選單）先於 y 大的（對話框）
@@ -7540,7 +8377,7 @@ class LangForgeApp:
         tgt_lang = getattr(self, "tgt_lang_var", None)
         tgt_lang_str = tgt_lang.get() if tgt_lang else "Traditional Chinese(正體中文)"
         font_size = OVERLAY_FONT_SIZE_MAX_DEFAULT
-        min_font_size = 9  # 方向A：允許縮小至 9px 作為疊字輔助
+        min_font_size = 7  # 允許縮小至 7px，改善正體中文長句在底部截斷問題
 
         while font_size >= min_font_size:
             font = _get_font_for_lang(tgt_lang_str, font_size)
