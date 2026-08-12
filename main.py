@@ -1,24 +1,21 @@
 """
-LangForge V1.0.1-beta.7
+LangForge V1.5.2
 應用程式入口點
 """
 
 import sys
 import os
+import importlib.util
+import tkinter as tk
+import ctypes
 
-# 添加 langforge 模組到路徑
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 直接載入 langforge.py
+LANGFORGE_PATH = os.path.join(os.path.dirname(__file__), 'langforge', 'core', 'langforge.py')
+spec = importlib.util.spec_from_file_location("langforge_module", LANGFORGE_PATH)
+lf = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(lf)
 
 if __name__ == "__main__":
-    # 從 langforge.core.langforge 導入所有必要的模組和類別
-    import tkinter as tk
-    import ctypes
-    from langforge.core.langforge import (
-        SplashScreen,
-        LangForgeApp,
-        CURRENT_LANG,
-    )
-    
     # 設定 Per-Monitor DPI Aware
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -34,8 +31,8 @@ if __name__ == "__main__":
     root.update_idletasks()
     
     # 建立 Splash 和應用程式
-    splash = SplashScreen(root)
-    app = LangForgeApp(root, splash=splash)
+    splash = lf.SplashScreen(root)
+    app = lf.LangForgeApp(root, splash=splash)
     
     # 啟動主迴圈
     root.mainloop()
