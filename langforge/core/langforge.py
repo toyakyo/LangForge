@@ -1,4 +1,4 @@
-"""LangForge V1.5.1
+"""LangForge V1.5.2
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -169,7 +169,7 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.5.1"
+ABOUT_VERSION = "V1.5.2"
 DEBUG_COORD = True  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
@@ -210,6 +210,7 @@ UI_STRINGS = {
         "msg_delete_cat": "刪除主類別「{cat}」及其所有平台？",
         "status_save_fail": "儲存失敗: {err}",
         "lbl_ollama_hint": "（建議 30～120，依模型大小調整）",
+        "lbl_ollama_startup_hint": "💡 首次載入模型約需 10～60 秒，之後速度明顯提升。閒置 5 分鐘後模型自動卸載。",
         "title_translate": "翻譯結果",
         "title_guide": "攻略資訊",
         "playback_done": "播放完畢",
@@ -543,6 +544,7 @@ UI_STRINGS = {
         "msg_delete_cat": 'Delete category "{cat}" and all its platforms?',
         "status_save_fail": "Save failed: {err}",
         "lbl_ollama_hint": "(Recommended 30~120, adjust by model size)",
+        "lbl_ollama_startup_hint": "💡 First load takes 10–60 sec; faster after. Model auto-unloads after 5 min idle.",
         "title_translate": "Translation",
         "title_guide": "Guide Info",
         "playback_done": "Playback Complete",
@@ -943,7 +945,7 @@ IMG_OLLAMA_SMALL  = (None, 85)
 IMG_OLLAMA_MEDIUM = (800,  75)
 IMG_OLLAMA_LARGE  = (1024, 70)
 
-IMG_SIMPLE = (None, 75)
+IMG_SIMPLE = (448, 70)  # ponytail: 限制 vision token 數，緩解 KV cache 累積導致的 VRAM OOM
 _FONT_LEVEL_SIZES = {1: 48, 2: 36, 3: 24, 4: 18, 5: 13}  # 5 級字型，1=最大  # ponytail: 簡易模式不縮圖，本地推理無頻寬瓶頸，辨識率優先
 
 DISPLAY_WIDTH_SMALL      = 512
@@ -2097,6 +2099,7 @@ def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOU
         "model": model,
         "messages": [{"role": "user", "content": prompt, "images": [img_b64]}],
         "stream": False,
+        "keep_alive": 0,
         "options": {"num_predict": 2048, "temperature": 0},
     }
     _thinking_keywords = {"minicpm", "qwen3", "deepseek-r1", "gemma4"}
@@ -2726,7 +2729,7 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.5.1")
+        self.root.title("LangForge  V1.5.2")
         _load_app_icon(self.root)
 
         global CURRENT_LANG
@@ -2866,6 +2869,9 @@ class LangForgeApp:
         self.simple_ollama_combo = ttk.Combobox(eng_lf, textvariable=self.ollama_model_var,
                      values=_init_filtered, state="readonly", width=44)
         self.simple_ollama_combo.pack(padx=6, pady=(0, 2), fill="x")
+        ttk.Label(eng_lf, text=S("lbl_ollama_startup_hint"),
+                  font=("Arial", 8), foreground="gray", wraplength=520, justify="left"
+                  ).pack(anchor="w", padx=6, pady=(0, 4))
         timeout_row = ttk.Frame(eng_lf)
         timeout_row.pack(fill="x", padx=6, pady=(0, 4))
         ttk.Label(timeout_row, text=S("lbl_ollama_timeout"), font=("Arial", 9)).pack(side="left")
@@ -3165,6 +3171,9 @@ class LangForgeApp:
                 ollama_inner, textvariable=self.ollama_model_var, values=_init_models, state="readonly", width=44
             )
             self.ollama_combo.pack(padx=6, pady=(0, 2), fill="x")
+            ttk.Label(ollama_inner, text=S("lbl_ollama_startup_hint"),
+                      font=("Arial", 8), foreground="gray", wraplength=520, justify="left"
+                      ).pack(anchor="w", padx=6, pady=(0, 4))
             self.ollama_combo.bind("<<ComboboxSelected>>", self._on_use_ollama_toggle)
             timeout_row = ttk.Frame(ollama_inner)
             timeout_row.pack(fill="x", padx=6, pady=(2, 2))
