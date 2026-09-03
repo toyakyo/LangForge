@@ -1,4 +1,4 @@
-"""LangForge V1.5.2
+"""LangForge V1.5.6
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -13,7 +13,7 @@ import threading
 import queue
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-import sys, os, ctypes, shutil, io, json, time, re, base64
+import sys, os, ctypes, shutil, io, json, time, re, base64, subprocess
 import hashlib
 import warnings
 import logging
@@ -30,6 +30,28 @@ import win32gui
 # 三層環境自動偵測
 # ==========================================
 IS_FROZEN = getattr(sys, 'frozen', False)  # PyInstaller 標記
+IS_OEM = True   # OEM 版旗標：True=鑫鵬瑜版，False=公開版
+# ── OEM LOGO 從 logo.txt 載入（放在 LangForge.py 同目錄）──
+def _load_oem_logos():
+    import os, base64 as _b64
+    _dir = os.path.dirname(sys.executable if IS_FROZEN else os.path.abspath(__file__))
+    _path = os.path.join(_dir, "logo.txt")
+    _logos = {"H": "", "ABOUT": "", "V": ""}
+    try:
+        with open(_path, "r") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if ":" in _line:
+                    _k, _v = _line.split(":", 1)
+                    if _k in _logos:
+                        _logos[_k] = _v
+    except Exception:
+        pass
+    return _logos
+
+_OEM_LOGOS = _load_oem_logos()
+_OEM_LOGO_ABOUT = _OEM_LOGOS["ABOUT"]
+_OEM_LOGO_V     = _OEM_LOGOS["V"]
 current_file = os.path.abspath(__file__)
 
 # 偵測執行環境
@@ -169,7 +191,7 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.5.2"
+ABOUT_VERSION = "V1.5.6"
 DEBUG_COORD = True  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
@@ -261,9 +283,16 @@ UI_STRINGS = {
         "status_ocr_no_result": "OCR 無有效結果",
         "status_ocr_done": "OCR 翻譯完成（{n} 段）",
         "status_bad_request": "請求格式錯誤，該模型可能不支援圖片",
+        "status_not_found": "找不到此模型或端點，請確認模型名稱是否正確",
+        "status_not_found_nvcf": "此模型使用舊版端點格式，程式不相容，請從清單中移除",
+        "status_unsupported": "此模型不支援圖片輸入功能",
+        "status_api_unknown": "API 呼叫失敗，請稍後再試",
+        "status_model_format_fail": "此模型回應格式不符，無法解析翻譯結果。建議更換模型或重試。",
+        "status_model_ocr_only": "此模型未執行翻譯，僅辨識原文。建議更換支援翻譯的模型。",
+        "status_model_format_and_ocr": "此模型回應格式不符且未執行翻譯，建議更換模型。",
         "status_server_error": "{engine} 伺服器內部錯誤，請稍後重試",
         "status_network_fail": "網路連線失敗，請檢查網路",
-        "status_api_fail": "API 失敗: {msg}",
+        "status_api_fail": "API 回應錯誤: {msg}",
         "lbl_queue": "佇列",
         "lbl_cooldown": "冷卻",
         "status_cooling": "{model} 冷卻中，請等 {wait} 秒",
@@ -325,6 +354,14 @@ UI_STRINGS = {
         "btn_clear_queue": "清空要求任務",
         "btn_refresh_models": "更新模型",
         "btn_refresh_ollama": "重新偵測",
+        "btn_oem_install_ollama": "安裝 OLLAMA",
+        "btn_oem_pull_gemma": "下載預設模型",
+        "status_oem_checking": "等待 OLLAMA 安裝完成，自動偵測中...",
+        "status_oem_ollama_ready": "OLLAMA 已就緒，可以下載模型",
+        "status_oem_pulling": "下載 gemma4:12b-it-qat（約 7.2GB），請耐心等候...",
+        "status_oem_pull_done": "gemma4:12b-it-qat 下載完成！",
+        "btn_query_device": "查詢裝置",
+        "lbl_device_unknown": "未載入",
         "status_ready": "狀態: 就緒",
         # ── Tab2 擷取設定 ──
         "lbl_target_win": "目標視窗標題:",
@@ -392,6 +429,7 @@ UI_STRINGS = {
         "th_engine": "引擎",
         "th_used": "已用",
         "th_limit": "上限",
+        "th_min_resp": "最短(s)",
         "quota_no_limit": "無額度",
         "quota_conservative": "保守額度(50)",
         "quota_no_free": "⚠ 無免費額度",
@@ -466,8 +504,10 @@ UI_STRINGS = {
         "btn_session_delete": "刪除場次",
         "session_no_select": "請先選取場次",
         "btn_stop_playback": "■ 停止播放",
-        "status_ollama_timeout": "OLLAMA 推理逾時，請增加 Timeout 或換小模型",
-        "status_ollama_fail": "OLLAMA 呼叫失敗: {err}",
+        "status_ollama_timeout": "OLLAMA 推理逾時，請加長 Timeout 秒數或換用較小的模型",
+        "status_ollama_fail": "OLLAMA 連線失敗: {err}",
+        "status_ollama_oom_crash": "OLLAMA 異常終止（VRAM 不足），請重啟 OLLAMA 後再試",
+        "status_ollama_empty_response": "模型未回傳內容，請嘗試更換模型或重新擷取畫面",
         "status_ollama_no_model": "請選擇 OLLAMA 模型",
         # ── 硬編碼補全 ──
         "lf_actions": "功能",
@@ -595,9 +635,16 @@ UI_STRINGS = {
         "status_ocr_no_result": "OCR no valid results",
         "status_ocr_done": "OCR done ({n} segments)",
         "status_bad_request": "Bad request format, model may not support images",
+        "status_not_found": "Model or endpoint not found. Check the model name.",
+        "status_not_found_nvcf": "This model uses a legacy endpoint format not supported by this app. Remove it from the list.",
+        "status_unsupported": "This model does not support image input.",
+        "status_api_unknown": "API call failed. Please try again later.",
+        "status_model_format_fail": "Model response format invalid, cannot parse. Try a different model or retry.",
+        "status_model_ocr_only": "Model performed OCR only without translating. Try a model with translation support.",
+        "status_model_format_and_ocr": "Model response format invalid and untranslated. Please switch to a different model.",
         "status_server_error": "{engine} server error, try later",
         "status_network_fail": "Network connection failed, check your network",
-        "status_api_fail": "API failed: {msg}",
+        "status_api_fail": "API error: {msg}",
         "lbl_queue": "Queue",
         "lbl_cooldown": "Cooldown",
         "status_cooling": "{model} cooldown, wait {wait}s",
@@ -653,9 +700,11 @@ UI_STRINGS = {
         "status_model_exists": "Model already exists: {model}",
         "status_model_removed": "Removed: {model}",
         "status_no_model_remove": "No model found to remove",
-        "status_ollama_fail": "OLLAMA call failed: {err}",
+        "status_ollama_fail": "OLLAMA connection failed: {err}",
         "status_ollama_no_model": "Please select an OLLAMA model",
-        "status_ollama_timeout": "OLLAMA timed out. Increase Timeout or use a smaller model",
+        "status_ollama_timeout": "OLLAMA timed out — increase Timeout or use a smaller model",
+        "status_ollama_oom_crash": "OLLAMA crashed (VRAM out of memory). Restart OLLAMA and retry.",
+        "status_ollama_empty_response": "Model returned no content. Try another model or recapture.",
         "status_queue_full": "Queue full (max 10). Please wait.",
         "status_queue_waiting": "Queued ({n} tasks)",
         "status_win_added": "Added: {name}",
@@ -702,6 +751,14 @@ UI_STRINGS = {
         "btn_clear_queue": "Clear Pending Tasks",
         "btn_refresh_models": "Refresh Models",
         "btn_refresh_ollama": "Re-detect",
+        "btn_oem_install_ollama": "Install OLLAMA",
+        "btn_oem_pull_gemma": "Download Default Model",
+        "status_oem_checking": "Waiting for OLLAMA installation, auto-detecting...",
+        "status_oem_ollama_ready": "OLLAMA ready. You can now download the model.",
+        "status_oem_pulling": "Downloading gemma4:12b-it-qat (~7.2GB), please wait...",
+        "status_oem_pull_done": "gemma4:12b-it-qat downloaded successfully!",
+        "btn_query_device": "Query Device",
+        "lbl_device_unknown": "Not loaded",
         "status_ready": "Status: Ready",
         # ── Tab2 ──
         "lbl_target_win": "Target Window Title:",
@@ -769,6 +826,7 @@ UI_STRINGS = {
         "th_engine": "Engine",
         "th_used": "Used",
         "th_limit": "Limit",
+        "th_min_resp": "Min(s)",
         "quota_no_limit": "No Quota",
         "quota_conservative": "Est.(50)",
         "quota_no_free": "⚠ No Free Quota",
@@ -941,12 +999,56 @@ IMG_CLOUD_SMALL  = (None, 85)
 IMG_CLOUD_MEDIUM = (1024, 80)
 IMG_CLOUD_LARGE  = (1280, 75)
 
-IMG_OLLAMA_SMALL  = (None, 85)
-IMG_OLLAMA_MEDIUM = (800,  75)
-IMG_OLLAMA_LARGE  = (1024, 70)
+IMG_OLLAMA_SMALL  = (None, 75)
 
-IMG_SIMPLE = (448, 70)  # ponytail: 限制 vision token 數，緩解 KV cache 累積導致的 VRAM OOM
+# ============================================================
+# OLLAMA 圖片參數（可手動調整）
+# ============================================================
+# 【圖片解析度】影響：辨識正確率 + 速度
+# Vision encoder 上限約 800px（超過自動降採樣，調再大也沒用）
+# 384px → 速度最快，但像素字型（SNES/FC）辨識失敗率高
+# 512px → 現代遊戲基本可用，DQ5 像素字型仍不穩定
+# 640px → 目前實測最佳甜蜜點，DQ5 成功率明顯提升（推薦）
+# 768px → 接近 vision encoder 上限，邊際效益遞減，速度略慢
+OLLAMA_IMG_WIDTH = 640
+
+# 【圖片壓縮品質】影響：辨識細節 + 傳輸大小
+# 60 → 速度優先，細節損失明顯
+# 70 → 目前預設，平衡（推薦）
+# 75 → 稍高品質，細節略佳
+# 85 → 高品質，檔案較大，對 OLLAMA 本地傳輸影響不大
+OLLAMA_IMG_QUALITY = 70
+
+IMG_OLLAMA_MEDIUM = (OLLAMA_IMG_WIDTH, OLLAMA_IMG_QUALITY)
+IMG_OLLAMA_LARGE  = (OLLAMA_IMG_WIDTH, OLLAMA_IMG_QUALITY)
+IMG_SIMPLE        = (448, 70)
 _FONT_LEVEL_SIZES = {1: 48, 2: 36, 3: 24, 4: 18, 5: 13}  # 5 級字型，1=最大  # ponytail: 簡易模式不縮圖，本地推理無頻寬瓶頸，辨識率優先
+
+# ============================================================
+# OLLAMA 推理參數（可手動調整，None = 自動偵測或使用 OLLAMA 預設）
+# ============================================================
+
+# 【token 上限】影響：速度 + 正確率
+# 控制模型最多能生成幾個 token（thinking + JSON 輸出合計）
+# 太小 → thinking 跑一半被截斷，輸出空或不完整
+# 太大 → 等待時間變長，但成功率略高
+# CUDA 建議 4096（約 60-90 秒），Vulkan 建議 8192（約 90-150 秒）
+OLLAMA_NUM_PREDICT_CUDA   = None   # None=自動(4096)；可手動設 2048/4096/8192
+OLLAMA_NUM_PREDICT_VULKAN = None   # None=自動(8192)；可手動設 4096/8192
+
+# 【推理溫度】影響：正確率 + 穩定性
+# 控制模型輸出的隨機程度
+# None(預設) → 隨機性輸出，DQ5 像素字型偶爾成功
+# 0           → 確定性輸出，gemma4 對 DQ5 幾乎必定輸出原文
+# 0.7         → 高隨機，未充分測試
+OLLAMA_TEMPERATURE = None
+
+# 【thinking 抑制】影響：速度 + 正確率（模型相依）
+# 控制是否傳送 think:False 給模型
+# None  → 依模型自動（gemma4 不抑制；qwen3/minicpm 抑制）
+# True  → 強制所有模型抑制 thinking（速度快 ~10秒，但 DQ5 必定失敗）
+# False → 強制所有模型允許 thinking（速度慢 60-90秒，DQ5 有機會成功）
+OLLAMA_SUPPRESS_THINKING = True
 
 DISPLAY_WIDTH_SMALL      = 512
 DISPLAY_WIDTH_MEDIUM_PX1 = 700    # 原圖 513～700px 時輸出
@@ -1234,8 +1336,18 @@ for models in ENGINE_MODELS.values():
     ALL_MODELS.extend(models)
 
 
+_LOG_FILE = os.path.join(os.path.dirname(sys.executable if IS_FROZEN else __file__), "langforge.log")
+_log_fh = open(_LOG_FILE, "a", encoding="utf-8", buffering=1) if IS_FROZEN else None
+
+
 def log(msg):
-    print(f"[{time.strftime('%H:%M:%S')}] {msg}")
+    line = f"[{time.strftime('%H:%M:%S')}] {msg}"
+    print(line)
+    if _log_fh:
+        try:
+            _log_fh.write(line + "\n")
+        except Exception:
+            pass
 
 
 # ==========================================
@@ -1284,7 +1396,7 @@ def load_config():
     default = {eng: "" for eng in ENGINE_ORDER}
     default.update({"used_today": _default_used_today(), "date": today})
     default["hotkey"] = DEFAULT_HOTKEY
-    default["ui_lang"] = _detect_ui_lang()  # 依系統語系自動決定預設介面語言
+    default["ui_lang"] = "zh"  # 預設正體中文
 
     if not os.path.exists(KEY_FILE):
         return default
@@ -1405,35 +1517,40 @@ def _build_simple_display_text(segments: list) -> str:
     return "\n".join(s["tw"] for s in sorted(valid, key=lambda s: float(s.get("y", 0.5))))
 
 
+def _detect_ocr_only(segments: list, src_lang: str) -> bool:
+    """偵測模型是否只做 OCR 未翻譯：tw 含來源語言字元（日文假名等）即判定。"""
+    if "japanese" not in src_lang.lower() and "日文" not in src_lang:
+        return False
+    kana = re.compile(r'[\u3041-\u309F\u30A1-\u30FF]')
+    if not segments:
+        return False
+    kana_count = sum(1 for s in segments if kana.search(s.get("tw", "")))
+    return kana_count > len(segments) * 0.5
+
+
 def build_translate_prompt(src_lang: str, tgt_lang: str) -> str:
     if src_lang.startswith("All Foreign Text"):
         src_desc = "所有非母語的外文文字（無論何種語言）"
         no_text_cond = "沒有需要翻譯的外文"
+        lang_rule = f"'tw' 必須填入 {tgt_lang} 翻譯，禁止整段填入外文原文（專有名詞除外）。"
     else:
         src_desc = f"{src_lang} 文字"
         no_text_cond = f"沒有 {src_lang} 文字"
+        lang_rule = f"'tw' 必須填入 {tgt_lang} 翻譯，嚴禁整段填入 {src_lang} 原文（專有名詞除外）。"
     return (
-        f"你是遊戲翻譯專家。請辨識這張遊戲截圖中所有的 {src_desc}，"
-        f"並將每一段翻譯成 {tgt_lang}。"
-        f"注意：'tw' 欄位必須填入 {tgt_lang} 的翻譯結果，絕對不要填入原文。\n"
-        "【專有名詞規則】以下類型請直接保留原文，不要翻譯：\n"
-        "- 角色名稱、人名（例如：ルナナ、アグラニ 等）\n"
-        "- 遊戲內地名、場所名稱（例如：アグラニの村、ダーマ神殿 等）\n"
-        "- 遊戲專有技能名、道具名、組織名、種族名\n"
-        "- 難以用目標語言表達、只能音譯的固有名詞\n"
-        "若整段文字只有角色名稱或專有名詞（無實質對話內容），仍需回傳，'tw' 填入原文。\n"
-        "回傳格式為純 JSON 列表（不要包含 markdown 標記），每個元素包含：\n"
-        f"- 'tw': 翻譯結果（{tgt_lang}，專有名詞保留原文，其餘翻譯）\n"
-        "- 'x': 文字區塊左上角的水平位置（必須是 0.0~1.0 之間的小數比例值，絕對不可以是像素數值）\n"
-        "- 'y': 文字區塊左上角的垂直位置（必須是 0.0~1.0 之間的小數比例值，絕對不可以是像素數值）\n"
-        "- 'w': 文字區塊的寬度（必須是 0.0~1.0 之間的小數比例值）\n"
-        "- 'h': 文字區塊的高度（必須是 0.0~1.0 之間的小數比例值）\n"
-        "重要：x/y/w/h 全部必須是 0.0~1.0 的浮點數，例如畫面下方 75% 處寫 0.75，不可寫 480 這類像素值。\n"
-        "每個視覺上獨立的文字框必須單獨回傳為一個 segment，不同位置的文字不可合併。\n"
-        "特別注意：角色名稱框（通常在對話框上方或左側）與對話內容框是兩個不同位置，必須分為兩個 segment 各自回傳，x/y 分別對應各自框的位置。\n"
-        "即使多個文字框內容相關（如角色名稱與其對話），只要位置不同就各自獨立回傳，x/y 準確對應各自的位置。\n"
-        '範例: [{"tw": "翻譯文字", "x": 0.05, "y": 0.75, "w": 0.4, "h": 0.08}]\n'
-        f"如果{no_text_cond}，回傳空列表 []。只回傳 JSON，不要有其他文字。"
+        f"你的任務是將遊戲截圖中的 {src_desc} 翻譯成 {tgt_lang}。\n"
+        f"【最高優先規則】{lang_rule}\n"
+        "【專有名詞規則】角色名稱、地名、技能名、道具名保留原始字元（日文保留假名漢字，不得羅馬化）。\n"
+        "若整段文字只有固有名詞，仍需回傳，'tw' 填入原文。\n"
+        "回傳格式為純 JSON 列表（不含 markdown 標記），每個元素包含：\n"
+        f"- 'tw': {tgt_lang} 翻譯結果（固有名詞保留原始字元，其餘一律翻譯）\n"
+        "- 'x': 文字區塊左上角水平位置（0.0~1.0 比例值）\n"
+        "- 'y': 文字區塊左上角垂直位置（0.0~1.0 比例值）\n"
+        "- 'w': 文字區塊寬度（0.0~1.0 比例值）\n"
+        "- 'h': 文字區塊高度（0.0~1.0 比例值）\n"
+        "每個視覺上獨立的文字框單獨回傳，角色名稱框與對話框分為兩個 segment。\n"
+        'x/y/w/h 必須為 0.0~1.0 浮點數。範例: [{"tw": "翻譯文字", "x": 0.05, "y": 0.75, "w": 0.4, "h": 0.08}]\n'
+        f"如果{no_text_cond}，回傳 []。只回傳 JSON，不要有其他文字。"
     )
 
 
@@ -1645,7 +1762,7 @@ def _get_client(engine: str, api_key: str):
         from groq import Groq
         client = Groq(api_key=api_key)
     elif engine == "mistral":
-        from mistralai import Mistral
+        from mistralai.client import Mistral
         client = Mistral(api_key=api_key)
     elif engine == "openai":
         from openai import OpenAI
@@ -1715,7 +1832,9 @@ def call_groq(api_key, model, image_pil, prompt):
         max_completion_tokens=4096,
         timeout=10,
     )
-    return _parse_json_response(chat_completion.choices[0].message.content)
+    raw_content = chat_completion.choices[0].message.content
+    log(f"[Groq] 原始回應前500字: {raw_content[:500]!r}")
+    return _parse_json_response(raw_content)
 
 
 def call_mistral(api_key, model, image_pil, prompt):
@@ -2078,6 +2197,35 @@ OLLAMA_VISION_KEYWORDS = [
 ]
 
 
+_OLLAMA_NUM_PREDICT: int | None = None
+_IS_NVIDIA_GPU: bool | None = None
+
+
+def _detect_ollama_num_predict() -> int:
+    """WMI 偵測 GPU 廠牌：NVIDIA(CUDA)→4096，AMD/其他(Vulkan)→8192。"""
+    global _OLLAMA_NUM_PREDICT, _IS_NVIDIA_GPU
+    if _OLLAMA_NUM_PREDICT is not None:
+        return _OLLAMA_NUM_PREDICT
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-CimInstance Win32_VideoController | "
+             "Where-Object {$_.Name -like '*NVIDIA*'} | "
+             "Select-Object -First 1).Name"],
+            capture_output=True, text=True, timeout=6
+        )
+        gpu_name = r.stdout.strip()
+        _IS_NVIDIA_GPU = bool(gpu_name)  # 有找到 NVIDIA 卡就是 True
+        log(f"[OLLAMA] WMI GPU 偵測: {gpu_name!r} → {'NVIDIA/CUDA' if _IS_NVIDIA_GPU else '非NVIDIA/Vulkan'}")
+        _OLLAMA_NUM_PREDICT = 4096 if _IS_NVIDIA_GPU else 8192
+    except Exception:
+        _IS_NVIDIA_GPU = False
+        _OLLAMA_NUM_PREDICT = 8192
+    backend = "CUDA" if _IS_NVIDIA_GPU else "Vulkan/其他"
+    log(f"[OLLAMA] num_predict 自動選擇: {_OLLAMA_NUM_PREDICT} ({backend})")
+    return _OLLAMA_NUM_PREDICT
+
+
 def _filter_vision_models(all_models: list) -> list:
     result = []
     for m in all_models:
@@ -2095,16 +2243,43 @@ def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOU
 
     image_pil, quality = _prepare_img_for_engine(image_pil, engine_type)
     img_b64 = _img_to_jpeg_b64(image_pil, quality)
+    _num_predict = _detect_ollama_num_predict()
+    _is_cuda = globals().get("_IS_NVIDIA_GPU", False)
+    # 手動覆蓋（OLLAMA_NUM_PREDICT_CUDA/VULKAN 不為 None 時優先）
+    if _is_cuda and OLLAMA_NUM_PREDICT_CUDA is not None:
+        _num_predict = OLLAMA_NUM_PREDICT_CUDA
+    elif not _is_cuda and OLLAMA_NUM_PREDICT_VULKAN is not None:
+        _num_predict = OLLAMA_NUM_PREDICT_VULKAN
+
+    # thinking 抑制邏輯
+    _thinking_keywords = {"minicpm", "qwen3", "deepseek-r1"}
+    _no_think_keywords = {"minicpm", "qwen3"}
+    if OLLAMA_SUPPRESS_THINKING is True:
+        is_thinking_model = True   # 強制所有本地模型抑制 thinking
+    elif OLLAMA_SUPPRESS_THINKING is False:
+        is_thinking_model = False  # 強制所有本地模型放行 thinking
+    else:
+        is_thinking_model = any(k in model.lower() for k in _thinking_keywords)
+    needs_no_think_msg = any(k in model.lower() for k in _no_think_keywords)
+    messages = []
+    if needs_no_think_msg:
+        messages.append({"role": "system", "content": "/no_think"})
+    messages.append({"role": "user", "content": prompt, "images": [img_b64]})
+    _opts: dict = {"num_predict": _num_predict}
+    if OLLAMA_TEMPERATURE is not None:
+        _opts["temperature"] = OLLAMA_TEMPERATURE
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt, "images": [img_b64]}],
+        "messages": messages,
         "stream": False,
-        "keep_alive": 0,
-        "options": {"num_predict": 2048, "temperature": 0},
+        "options": _opts,
     }
-    _thinking_keywords = {"minicpm", "qwen3", "deepseek-r1", "gemma4"}
-    if any(k in model.lower() for k in _thinking_keywords):
+    if is_thinking_model:
         payload["think"] = False
+    _temp = payload["options"].get("temperature", "default")
+    _think_api = "已傳送(think:False)" if payload.get("think") is False else "未傳送"
+    _think_mode = "抑制" if is_thinking_model else "自由"
+    log(f"[OLLAMA] 參數 num_predict={_num_predict} temperature={_temp} think_api={_think_api} thinking={_think_mode} | img_width={OLLAMA_IMG_WIDTH}px quality={OLLAMA_IMG_QUALITY}")
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         f"{OLLAMA_BASE_URL}/api/chat", data=body, headers={"Content-Type": "application/json"}, method="POST"
@@ -2131,7 +2306,7 @@ def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOU
     if not finished:
         # 逾時：daemon thread 會自然結束，這裡直接拋例外
         raise TimeoutError(
-            f"OLLAMA 推理逾時（>{timeout}s），模型 {model} 回應過慢，" f"請縮短 Timeout 秒數或換較小的模型。"
+            f"OLLAMA 推理逾時（>{timeout}s），模型 {model} 回應過慢，" f"請加長 Timeout 秒數，或換用較小的模型。"
         )
 
     outcome = result_holder[0]
@@ -2140,6 +2315,8 @@ def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOU
 
     result = json.loads(outcome)
     text = result.get("message", {}).get("content", "")
+    if not text.strip():
+        raise ValueError("OLLAMA_EMPTY_RESPONSE")
     log(f"[OLLAMA] 原始回應前1000字: {text[:1000]!r}")
     return _parse_json_response(text)
 
@@ -2147,6 +2324,35 @@ def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOU
 # ==========================================
 # Segment 預處理：合併相近區塊（防疊字輔助）
 # ==========================================
+def _text_px(font, s: str, avg_cw: float) -> int:
+    """單行文字的實際像素寬。
+    必須用 font.getlength 實測：avg_cw(font_size*0.55) 是半形比例，
+    對全形中日文會低估近一半，導致碰撞判斷漏判。
+    """
+    try:
+        return int(font.getlength(s))
+    except Exception:
+        return int(len(s) * avg_cw)
+
+
+def _resolve_overlap_y(x0: int, x1: int, raw_y: int, block_h: int, placed: list) -> int:
+    """回傳不與 placed 中任何方塊相交的 draw_y（只往下推，不上移）。
+    placed 元素格式：(x0, y0, x1, y1)。
+    只有水平區間真的相交時才視為疊字——並排的短文字（如狀態列）維持原 y。
+    """
+    draw_y = raw_y
+    for _ in range(len(placed) + 1):
+        hit = None
+        for b in placed:
+            if x0 < b[2] and x1 > b[0] and draw_y < b[3] and draw_y + block_h > b[1]:
+                hit = b
+                break
+        if hit is None:
+            break
+        draw_y = hit[3]
+    return draw_y
+
+
 def _merge_segments(segments: list, x_thresh: float = 0.08, y_thresh: float = 0.12) -> list:
     """將 x 座標相近（差距 < x_thresh）且 y 座標鄰近（差距 < y_thresh）
     的 segment 合併為一個，譯文以空格串接。
@@ -2729,7 +2935,7 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.5.2")
+        self.root.title("LangForge  V1.5.6")
         _load_app_icon(self.root)
 
         global CURRENT_LANG
@@ -2817,6 +3023,25 @@ class LangForgeApp:
         frm = ttk.Frame(root, padding=8)
         frm.pack(fill="both", expand=True)
 
+        # ── OEM 版：右下角浮水印（直式瀚鎧 LOGO 25% 透明）──
+        if IS_OEM:
+            def _place_watermark():
+                try:
+                    import base64 as _b64, io as _io
+                    from PIL import Image as _Img, ImageTk as _ITk
+                    _wm_data = _b64.b64decode(_OEM_LOGO_V)
+                    _wm_img = _Img.open(_io.BytesIO(_wm_data))
+                    # 調整浮水印尺寸（修改 _WM_W/_WM_H 即可，不需重產 logo.txt）
+                    _WM_W, _WM_H = 150, 110
+                    _wm_img = _wm_img.resize((_WM_W, _WM_H), _Img.LANCZOS)
+                    self._oem_logo_v_photo = _ITk.PhotoImage(_wm_img)
+                    _wm_lbl = tk.Label(root, image=self._oem_logo_v_photo,
+                                       bd=0, highlightthickness=0)
+                    _wm_lbl.place(relx=1.0, rely=1.0, anchor="ne", x=-10, y=-120)
+                except Exception:
+                    pass
+            root.after(300, _place_watermark)
+
         # ── 跨模式共用 vars（簡易/進階共用同一份）──
         _saved_targets_pre = self.config.get("target_windows", [])
         self.title_var = tk.StringVar(value=_saved_targets_pre[0] if _saved_targets_pre else "")
@@ -2854,6 +3079,23 @@ class LangForgeApp:
         # ── 本地引擎 ──
         eng_lf = ttk.LabelFrame(tab7, text=S("lf_simple_engine"))
         eng_lf.pack(fill="x", pady=(0, 6))
+
+        # ── OEM 快速設定按鈕（僅在 OLLAMA 未安裝時顯示）──
+        if not self._ollama_available:
+            oem_row7 = ttk.Frame(eng_lf)
+            oem_row7.pack(fill="x", padx=6, pady=(4, 2))
+            ttk.Button(oem_row7, text=S("btn_oem_install_ollama"),
+                       command=self._oem_install_ollama, width=14).pack(side="left", padx=(0, 4))
+            _btn7 = ttk.Button(oem_row7, text=S("btn_oem_pull_gemma"),
+                               command=self._oem_pull_gemma,
+                               width=18, state="disabled")
+            _btn7.pack(side="left")
+            if not hasattr(self, "_oem_pull_btns"):
+                self._oem_pull_btns = []
+            self._oem_pull_btns.append(_btn7)
+            if not hasattr(self, "_oem_install_frames"):
+                self._oem_install_frames = []
+            self._oem_install_frames.append(eng_lf)
         _init_ollama = _init_ollama_pre
         self.simple_model_var = self.ollama_model_var
         # 過濾開關列（與 Tab1 一致）
@@ -2869,6 +3111,8 @@ class LangForgeApp:
         self.simple_ollama_combo = ttk.Combobox(eng_lf, textvariable=self.ollama_model_var,
                      values=_init_filtered, state="readonly", width=44)
         self.simple_ollama_combo.pack(padx=6, pady=(0, 2), fill="x")
+        self.simple_ollama_combo.bind("<<ComboboxSelected>>",
+                                      lambda e: self._stop_running_ollama_model())
         ttk.Label(eng_lf, text=S("lbl_ollama_startup_hint"),
                   font=("Arial", 8), foreground="gray", wraplength=520, justify="left"
                   ).pack(anchor="w", padx=6, pady=(0, 4))
@@ -2879,6 +3123,9 @@ class LangForgeApp:
         ttk.Label(timeout_row, text=S("lbl_timeout_hint"), font=("Arial", 8), foreground="gray").pack(side="left")
         redetect_row7 = ttk.Frame(eng_lf)
         redetect_row7.pack(fill="x", padx=6, pady=(0, 4))
+        self.simple_device_label = ttk.Label(redetect_row7, text=S("lbl_device_unknown"),
+                                             font=("Arial", 9), foreground="gray")
+        self.simple_device_label.pack(side="left", padx=(0, 8))
         ttk.Button(redetect_row7, text=S("btn_refresh_ollama"),
                    command=self._refresh_ollama_models, width=10).pack(side="right")
 
@@ -2963,14 +3210,41 @@ class LangForgeApp:
                         command=self._on_simple_auto_toggle).pack(side="left")
 
         # ── 簡易模式狀態列（與 Tab1 的 self.status 同步更新）──
-        simple_status_row = ttk.Frame(tab7)
-        simple_status_row.pack(side="bottom", fill="x", padx=4, pady=(4, 2))
-        self.simple_elapsed_label = ttk.Label(simple_status_row, text="", foreground="gray",
-                                              font=("Arial", 9), anchor="e", width=8)
-        self.simple_elapsed_label.pack(side="right")
-        self.simple_status = ttk.Label(simple_status_row, text=S("status_ready"), foreground="blue",
-                                       font=("Arial", 9), anchor="w")
+        # ── 簡易模式五列狀態列（對齊進階模式）──
+        simple_status_wrap = ttk.Frame(tab7)
+        simple_status_wrap.pack(side="bottom", fill="x", pady=(2, 0))
+
+        # 第一列：分析狀態訊息
+        simple_s_row1 = ttk.Frame(simple_status_wrap)
+        simple_s_row1.pack(fill="x")
+        self.simple_status = ttk.Label(simple_s_row1, text=S("status_ready"), foreground="blue",
+                                       font=("Arial", 9), anchor="w", wraplength=360)
         self.simple_status.pack(side="left", fill="x", expand=True)
+
+        # 第二列：耗時
+        simple_s_row2 = ttk.Frame(simple_status_wrap)
+        simple_s_row2.pack(fill="x")
+        self.simple_elapsed_label = ttk.Label(simple_s_row2, text="", foreground="steelblue",
+                                              font=("Arial", 8), anchor="w")
+        self.simple_elapsed_label.pack(side="left")
+
+        # 第三列：場次狀態（空，保留結構一致性）
+        ttk.Frame(simple_status_wrap).pack(fill="x")
+
+        # 第四列：空（佇列）
+        ttk.Frame(simple_status_wrap).pack(fill="x")
+
+        # 第五列：指示燈（靠左）
+        simple_s_row5 = ttk.Frame(simple_status_wrap)
+        simple_s_row5.pack(fill="x")
+        tk.Label(simple_s_row5, text=S("ind_auto"), font=("Arial", 8),
+                 fg="gray", bg="#f0f0f0", relief="flat", padx=3).pack(side="left", padx=(0, 2))
+        tk.Label(simple_s_row5, text=S("ind_guide"), font=("Arial", 8),
+                 fg="gray", bg="#f0f0f0", relief="flat", padx=3).pack(side="left", padx=(0, 2))
+        tk.Label(simple_s_row5, text=S("ind_hotkey"), font=("Arial", 8),
+                 fg="gray", bg="#f0f0f0", relief="flat", padx=3).pack(side="left", padx=(0, 2))
+        tk.Label(simple_s_row5, text=S("ind_guide_hotkey"), font=("Arial", 8),
+                 fg="gray", bg="#f0f0f0", relief="flat", padx=3).pack(side="left")
         self.nb = nb
         self._apply_ui_mode()
 
@@ -2981,42 +3255,47 @@ class LangForgeApp:
         # ── 雙列狀態列（貼底，必須最先 pack）──
         status_wrap = ttk.Frame(tab1)
         status_wrap.pack(side="bottom", fill="x", pady=(2, 0))
-
-        # 第一列：欄1 分析狀態、欄2 冷卻、欄3 留空、欄4 耗時
-        status_row1 = ttk.Frame(status_wrap)
-        status_row1.pack(fill="x")
-
-        # 欄4 耗時先 pack side=right，讓 expand 的欄1 不吃掉右側空間
-        self.elapsed_label = ttk.Label(status_row1, text="", foreground="gray", font=("Arial", 9), anchor="e", width=8)
-        self.elapsed_label.pack(side="right")
         self._trans_start_time = None
         self._elapsed_timer_id = None
-
-        # 欄2 冷卻（固定寬度，不截字）
-        self.cooldown_label = ttk.Label(
-            status_row1, text="", foreground="gray", font=("Arial", 9), anchor="w", width=10
-        )
-        self.cooldown_label.pack(side="right", padx=(4, 6))
         self._cooldown_timer_id = None
 
-        # 欄1 分析狀態（fill 剩餘空間，不截字）
-        self.status = ttk.Label(status_row1, text=S("status_ready"), foreground="blue", font=("Arial", 9), anchor="w")
+        # 第一列：分析狀態訊息（展開填滿）
+        status_row1 = ttk.Frame(status_wrap)
+        status_row1.pack(fill="x")
+        self.status = ttk.Label(status_row1, text=S("status_ready"), foreground="blue",
+                                font=("Arial", 9), anchor="w", wraplength=360)
         self.status.pack(side="left", fill="x", expand=True)
 
-        # 第二列：欄1 場次狀態、欄2 佇列狀態、欄3 四開關指示燈
+        # 第二列：冷卻（雲端才顯示）+ 耗時 (API:Xs/整體:Ys)
         status_row2 = ttk.Frame(status_wrap)
         status_row2.pack(fill="x")
+        self.cooldown_label = ttk.Label(status_row2, text="", foreground="orange",
+                                        font=("Arial", 8), anchor="w")
+        self.cooldown_label.pack(side="left", padx=(0, 8))
+        self.timing_label = ttk.Label(status_row2, text="", foreground="steelblue",
+                                      font=("Arial", 8), anchor="w")
+        self.timing_label.pack(side="left")
 
+        # 第三列：場次狀態
+        status_row3 = ttk.Frame(status_wrap)
+        status_row3.pack(fill="x")
         self._session_status_label = ttk.Label(
-            status_row2, text=S("session_idle"), foreground="gray", font=("Arial", 8), anchor="w"
+            status_row3, text=S("session_idle"), foreground="gray", font=("Arial", 8), anchor="w"
         )
-        self._session_status_label.pack(side="left", padx=(0, 6))
+        self._session_status_label.pack(side="left")
 
-        self.queue_label = ttk.Label(status_row2, text="", foreground="gray", font=("Arial", 8), anchor="w")
-        self.queue_label.pack(side="left", expand=True)
+        # 第四列：佇列狀態
+        status_row4 = ttk.Frame(status_wrap)
+        status_row4.pack(fill="x")
+        self.queue_label = ttk.Label(status_row4, text="", foreground="gray",
+                                     font=("Arial", 8), anchor="w")
+        self.queue_label.pack(side="left", fill="x", expand=True)
 
-        indicator_frame = ttk.Frame(status_row2)
-        indicator_frame.pack(side="right")
+        # 第五列：四個指示燈（靠右）
+        status_row5 = ttk.Frame(status_wrap)
+        status_row5.pack(fill="x")
+        indicator_frame = ttk.Frame(status_row5)
+        indicator_frame.pack(side="left")
         self._ind_auto = tk.Label(
             indicator_frame, text=S("ind_auto"), font=("Arial", 8), fg="gray", bg="#f0f0f0", relief="flat", padx=3
         )
@@ -3033,17 +3312,15 @@ class LangForgeApp:
         self._ind_hotkey._lf_indicator = True
         self._ind_hotkey.pack(side="left", padx=(0, 2))
         self._ind_guide_hotkey = tk.Label(
-            indicator_frame,
-            text=S("ind_guide_hotkey"),
-            font=("Arial", 8),
-            fg="gray",
-            bg="#f0f0f0",
-            relief="flat",
-            padx=3,
+            indicator_frame, text=S("ind_guide_hotkey"), font=("Arial", 8),
+            fg="gray", bg="#f0f0f0", relief="flat", padx=3,
         )
         self._ind_guide_hotkey._lf_indicator = True
         self._ind_guide_hotkey.pack(side="left")
         self._update_indicators()
+
+        # elapsed_label 別名保持相容（舊程式碼用）
+        self.elapsed_label = self.timing_label
 
         # ── 引擎模式切換（雲端 / 本地） ──
         eng_mode_row1 = ttk.Frame(tab1)
@@ -3052,35 +3329,39 @@ class LangForgeApp:
 
         # OLLAMA 未偵測到時，本地選項 disabled
         _local_state = "normal" if self._ollama_available else "disabled"
-        _saved_mode = self.config.get("engine_mode", "cloud")
-        if not self._ollama_available and _saved_mode == "local":
-            _saved_mode = "cloud"  # OLLAMA 不可用時本地模式才強制回雲端
-        self.engine_mode_var = tk.StringVar(value=_saved_mode)
-
-        eng_mode_row = ttk.Frame(tab1)
-        eng_mode_row.pack(fill="x", pady=(0, 4))
-        ttk.Radiobutton(
-            eng_mode_row,
-            text=S("rb_engine_cloud"),
-            variable=self.engine_mode_var,
-            value="cloud",
-            command=self._on_engine_mode_change,
-        ).pack(side="left", padx=(4, 0))
-        ttk.Radiobutton(
-            eng_mode_row,
-            text=S("rb_engine_local"),
-            variable=self.engine_mode_var,
-            value="local",
-            state=_local_state,
-            command=self._on_engine_mode_change,
-        ).pack(side="left", padx=(8, 0))
-        ttk.Radiobutton(
-            eng_mode_row,
-            text=S("rb_engine_ocr"),
-            variable=self.engine_mode_var,
-            value="ocr",
-            command=self._on_engine_mode_change,
-        ).pack(side="left", padx=(8, 0))
+        if IS_OEM:
+            # OEM 版：強制本地引擎，不顯示選項列
+            _saved_mode = "local"
+            self.engine_mode_var = tk.StringVar(value="local")
+        else:
+            _saved_mode = self.config.get("engine_mode", "cloud")
+            if not self._ollama_available and _saved_mode == "local":
+                _saved_mode = "cloud"
+            self.engine_mode_var = tk.StringVar(value=_saved_mode)
+            eng_mode_row = ttk.Frame(tab1)
+            eng_mode_row.pack(fill="x", pady=(0, 4))
+            ttk.Radiobutton(
+                eng_mode_row,
+                text=S("rb_engine_cloud"),
+                variable=self.engine_mode_var,
+                value="cloud",
+                command=self._on_engine_mode_change,
+            ).pack(side="left", padx=(4, 0))
+            ttk.Radiobutton(
+                eng_mode_row,
+                text=S("rb_engine_local"),
+                variable=self.engine_mode_var,
+                value="local",
+                state=_local_state,
+                command=self._on_engine_mode_change,
+            ).pack(side="left", padx=(8, 0))
+            ttk.Radiobutton(
+                eng_mode_row,
+                text=S("rb_engine_ocr"),
+                variable=self.engine_mode_var,
+                value="ocr",
+                command=self._on_engine_mode_change,
+            ).pack(side="left", padx=(8, 0))
 
         # ── 引擎內容容器 ──
         self.engine_container = ttk.Frame(tab1)
@@ -3144,6 +3425,23 @@ class LangForgeApp:
         # ── 本地引擎區塊（OLLAMA） ──
         self.local_frame = ttk.Frame(self.engine_container)
 
+        # ── OEM 快速設定按鈕（僅在 OLLAMA 未安裝時顯示）──
+        self._oem_install_frames = []
+        self._oem_pull_btns = []
+        if not self._ollama_available:
+            _oem_frame = ttk.LabelFrame(self.local_frame, text="OLLAMA 設定")
+            _oem_frame.pack(fill="x", padx=2, pady=(0, 4))
+            self._oem_install_frames.append(_oem_frame)
+            oem_row = ttk.Frame(_oem_frame)
+            oem_row.pack(fill="x", padx=6, pady=6)
+            ttk.Button(oem_row, text=S("btn_oem_install_ollama"),
+                       command=self._oem_install_ollama, width=14).pack(side="left", padx=(0, 4))
+            _btn = ttk.Button(oem_row, text=S("btn_oem_pull_gemma"),
+                              command=self._oem_pull_gemma,
+                              width=18, state="disabled")
+            _btn.pack(side="left")
+            self._oem_pull_btns.append(_btn)
+
         if self._ollama_available:
             ollama_inner = ttk.LabelFrame(self.local_frame, text=S("lf_ollama"))
             ollama_inner.pack(fill="x", padx=2, pady=(0, 4))
@@ -3183,9 +3481,12 @@ class LangForgeApp:
             ttk.Label(timeout_row, text=S("lbl_timeout_hint"), font=("Arial", 8), foreground="gray").pack(side="left")
             self.ollama_timeout_var.trace_add("write", lambda *_: self._debounce_save_config())
 
-            # 右下角：重新偵測 OLLAMA 模型
+            # 右下角：重新偵測 OLLAMA 模型 + 推理裝置自動顯示
             ollama_btn_row = ttk.Frame(ollama_inner)
             ollama_btn_row.pack(fill="x", padx=6, pady=(2, 6))
+            self.device_label = ttk.Label(ollama_btn_row, text=S("lbl_device_unknown"),
+                                          font=("Arial", 9), foreground="gray")
+            self.device_label.pack(side="left", padx=(0, 8))
             ttk.Button(
                 ollama_btn_row, text=S("btn_refresh_ollama"), command=self._refresh_ollama_models, width=10
             ).pack(side="right")
@@ -3483,18 +3784,20 @@ class LangForgeApp:
         quota_scroll_frame.pack(fill="both", expand=True)
 
         # Treeview 取代 Text widget
-        cols = ("engine", "model", "used", "limit", "rpm")
+        cols = ("engine", "model", "used", "limit", "rpm", "min_resp")
         self.quota_table = ttk.Treeview(quota_scroll_frame, columns=cols, show="headings", selectmode="none", height=20)
         self.quota_table.heading("engine", text=S("th_engine"), anchor="w")
         self.quota_table.heading("model", text=S("th_model"), anchor="w")
         self.quota_table.heading("used", text=S("th_used"), anchor="e")
         self.quota_table.heading("limit", text=S("th_limit"), anchor="e")
         self.quota_table.heading("rpm", text="RPM", anchor="e")
+        self.quota_table.heading("min_resp", text=S("th_min_resp"), anchor="e")
         self.quota_table.column("engine", width=62, stretch=False, anchor="w")
-        self.quota_table.column("model", width=230, stretch=True, anchor="w")
+        self.quota_table.column("model", width=210, stretch=True, anchor="w")
         self.quota_table.column("used", width=44, stretch=False, anchor="e")
         self.quota_table.column("limit", width=56, stretch=False, anchor="e")
         self.quota_table.column("rpm", width=44, stretch=False, anchor="e")
+        self.quota_table.column("min_resp", width=56, stretch=False, anchor="e")
         # 交替底色 tag
         self.quota_table.tag_configure("odd", background="#f5f5f5")
         self.quota_table.tag_configure("even", background="#ffffff")
@@ -3989,6 +4292,15 @@ class LangForgeApp:
             self._t6_refresh_games()
             self._t6_load_list()
 
+    def _update_min_response(self, model: str, elapsed_sec: float):
+        """記錄模型最短回應時間，若更快則更新。"""
+        data = self.config.setdefault("model_min_response", {})
+        secs = max(0, int(elapsed_sec))
+        current = data.get(model, -999)
+        if current == -999 or secs < current:
+            data[model] = secs
+            save_config(self.config)
+
     def _refresh_quota_table(self):
         global CURRENT_LANG
         CURRENT_LANG = self.config.get("ui_lang", "zh")
@@ -4002,6 +4314,7 @@ class LangForgeApp:
         self.quota_table.heading("model", text=S("th_model"))
         self.quota_table.heading("used", text=S("th_used"))
         self.quota_table.heading("limit", text=S("th_limit"))
+        self.quota_table.heading("min_resp", text=S("th_min_resp"))
 
         # 清空舊資料
         for row in self.quota_table.get_children():
@@ -4048,8 +4361,15 @@ class LangForgeApp:
                 else:
                     tags = ("odd",) if row_idx % 2 == 0 else ("even",)
 
+                min_resp_data = self.config.get("model_min_response", {})
+                min_val = min_resp_data.get(m, -999)
+                if min_val == -999:
+                    min_str = "--"
+                else:
+                    min_str = f"{min_val}s"
+
                 self.quota_table.insert(
-                    "", "end", iid=iid, values=(eng, m, used, limit_str, rpm_str), tags=tags
+                    "", "end", iid=iid, values=(eng, m, used, limit_str, rpm_str, min_str), tags=tags
                 )
                 row_idx += 1
 
@@ -4057,7 +4377,7 @@ class LangForgeApp:
             sep_iid = f"sep_{eng}"
             if sep_iid not in seen_iids:
                 seen_iids.add(sep_iid)
-                self.quota_table.insert("", "end", iid=sep_iid, values=("", "", "", "", ""), tags=("sep",))
+                self.quota_table.insert("", "end", iid=sep_iid, values=("", "", "", "", "", ""), tags=("sep",))
 
     # ══════════════════════════════════════════
     # Tab 4 — 歷史翻譯：內部方法
@@ -4780,22 +5100,23 @@ class LangForgeApp:
             draw = ImageDraw.Draw(blended)
 
             line_h = font_size + 4
-            col_next_y = {}
+            placed = []
             for tw, sx, sy in items:
-                col = int(sx * 8)
                 draw_x = max(PADDING, int(sx * out_w))
-                col_ny = col_next_y.get(col, PADDING)
-                raw_y = int(sy * out_h)
-                draw_y = raw_y if raw_y >= col_ny else col_ny
-                if draw_y + line_h > out_h - PADDING:
-                    continue
-                draw_wrapped_text_safe(draw, tw, draw_x + 1, draw_y + 1, font, out_w, out_h, (0, 0, 0))
-                draw_wrapped_text_safe(draw, tw, draw_x, draw_y, font, out_w, out_h, "white")
                 text_w = out_w - draw_x - PADDING
                 avg_cw = font_size * 0.55
                 cpl = max(1, int(text_w / avg_cw))
                 nlines = max(1, -(-len(tw) // cpl))
-                col_next_y[col] = draw_y + nlines * line_h + 2
+                block_h = nlines * line_h + 2
+                # 實際佔用寬度：單行只佔文字本身，多行才吃滿換行寬度
+                text_px = text_w if nlines > 1 else min(text_w, _text_px(font, tw, avg_cw))
+                raw_y = int(sy * out_h)
+                draw_y = _resolve_overlap_y(draw_x, draw_x + text_px, raw_y, block_h, placed)
+                if draw_y + line_h > out_h - PADDING:
+                    continue
+                draw_wrapped_text_safe(draw, tw, draw_x + 1, draw_y + 1, font, out_w, out_h, (0, 0, 0))
+                draw_wrapped_text_safe(draw, tw, draw_x, draw_y, font, out_w, out_h, "white")
+                placed.append((draw_x, draw_y, draw_x + text_px, draw_y + block_h))
 
             return blended.convert("RGB")
         except Exception as e:
@@ -5022,7 +5343,20 @@ class LangForgeApp:
         mx = self.root.winfo_x() + (self.root.winfo_width() - w) // 2
         my = self.root.winfo_y() + (self.root.winfo_height() - h) // 2
         win.geometry(f"{w}x{h}+{mx}+{my}")
-        ttk.Label(win, text="LangForge", font=("Arial", 14, "bold")).pack(pady=(16, 4))
+        # 頂部列：LangForge 標題（左）+ 瀚鎧 LOGO（右）
+        top_row = ttk.Frame(win)
+        top_row.pack(fill="x", padx=16, pady=(16, 4))
+        ttk.Label(top_row, text="LangForge", font=("Arial", 14, "bold")).pack(side="left")
+        if IS_OEM:
+            try:
+                import base64 as _b64a, io as _ioa
+                from PIL import Image as _Imga, ImageTk as _ITka
+                _about_img = _Imga.open(_ioa.BytesIO(_b64a.b64decode(_OEM_LOGO_ABOUT)))
+                self._oem_about_photo = _ITka.PhotoImage(_about_img)
+                tk.Label(top_row, image=self._oem_about_photo, bd=0,
+                         highlightthickness=0).pack(side="right")
+            except Exception:
+                pass
         author = ABOUT_AUTHOR if ABOUT_AUTHOR else "-"
         license_ = ABOUT_LICENSE if ABOUT_LICENSE else "-"
         is_zh = self.config.get("ui_lang", "zh") == "zh"
@@ -5972,20 +6306,32 @@ class LangForgeApp:
             self.simple_elapsed_label.config(text=f"{secs}s", foreground="steelblue")
         self._elapsed_timer_id = self.root.after(1000, self._elapsed_tick)
 
-    def _stamp_elapsed(self):
+    @staticmethod
+    def _fmt_time(secs: float) -> str:
+        s = int(secs)
+        return f"{s//60}m{s%60:02d}s" if s >= 60 else f"{s}s"
+
+    def _stamp_elapsed(self, api_secs: float | None = None):
         if not getattr(self, "_trans_start_time", None):
             return
         if getattr(self, "_elapsed_timer_id", None):
             self.root.after_cancel(self._elapsed_timer_id)
             self._elapsed_timer_id = None
-        secs = int(time.time() - self._trans_start_time)
+        total_secs = time.time() - self._trans_start_time
         self._trans_start_time = None
 
-        def _freeze(s=secs):
-            if hasattr(self, "elapsed_label") and self.elapsed_label.winfo_exists():
-                self.elapsed_label.config(text=f"{s}s", foreground="steelblue")
+        def _freeze(api=api_secs, total=total_secs):
+            if not (hasattr(self, "timing_label") and self.timing_label.winfo_exists()):
+                return
+            if api is not None:
+                txt = f"耗時:(API:{self._fmt_time(api)}/整體:{self._fmt_time(total)})"
+            else:
+                txt = f"耗時:(整體:{self._fmt_time(total)})"
+            self.timing_label.config(text=txt, foreground="steelblue")
             if hasattr(self, "simple_elapsed_label") and self.simple_elapsed_label.winfo_exists():
-                self.simple_elapsed_label.config(text=f"{s}s", foreground="steelblue")
+                self.simple_elapsed_label.config(
+                    text=self._fmt_time(total), foreground="steelblue"
+                )
 
         self.root.after(0, _freeze)
 
@@ -6531,6 +6877,62 @@ class LangForgeApp:
     # ══════════════════════════════════════════
     # 自訂雲端引擎管理
     # ══════════════════════════════════════════
+    def _query_ollama_device(self):
+        """翻譯完成後自動偵測推理後端（CUDA / Vulkan / CPU）及 GPU 佔比。"""
+        def _task():
+            try:
+                req = urllib.request.Request(f"{OLLAMA_BASE_URL}/api/ps")
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    data = json.loads(r.read().decode())
+                models = data.get("models", [])
+                if not models:
+                    result = S("lbl_device_unknown")
+                    color = "gray"
+                else:
+                    m = models[0]
+                    size_total = m.get("size", 0)
+                    size_vram = m.get("size_vram", 0)
+                    gpu_pct = int(size_vram / size_total * 100) if size_total > 0 else 0
+
+                    if size_vram == 0:
+                        result = "CPU"
+                        color = "orange"
+                    else:
+                        # 嘗試 nvidia-smi 判斷是否為 NVIDIA / CUDA
+                        gpu_name = ""
+                        backend = "Vulkan"  # AMD / Intel / 其他 → Vulkan
+                        try:
+                            out = subprocess.run(
+                                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                                capture_output=True, text=True, timeout=3
+                            )
+                            if out.returncode == 0 and out.stdout.strip():
+                                gpu_name = out.stdout.strip().splitlines()[0].strip()
+                                backend = "CUDA"
+                        except Exception:
+                            pass
+
+                        if gpu_name:
+                            result = f"{gpu_name} | {backend} | {gpu_pct}%"
+                        else:
+                            result = f"GPU | {backend} | {gpu_pct}%"
+                        color = "green"
+            except Exception:
+                result = S("lbl_device_unknown")
+                color = "gray"
+
+            def _upd(r=result, c=color):
+                for lbl in (getattr(self, "device_label", None),
+                             getattr(self, "simple_device_label", None)):
+                    if lbl:
+                        try:
+                            lbl.config(text=r, foreground=c)
+                        except Exception:
+                            pass
+            self.root.after(0, _upd)
+
+        threading.Thread(target=_task, daemon=True).start()
+
     def _refresh_ollama_models(self):
         new_models = _detect_ollama_vision_models()
         self._ollama_models = new_models
@@ -6552,7 +6954,100 @@ class LangForgeApp:
         )
         log(f"[OLLAMA] 重新偵測完成，找到 {count} 個模型")
 
+    def _oem_install_ollama(self):
+        """OEM: 以 PowerShell 直接安裝 OLLAMA，並開始輪詢偵測完成。"""
+        try:
+            subprocess.Popen(
+                ["powershell", "-ExecutionPolicy", "Bypass", "-Command",
+                 "irm https://ollama.com/install.ps1 | iex"],
+                creationflags=subprocess.CREATE_NEW_CONSOLE
+            )
+        except Exception as e:
+            log(f"[OEM] 啟動安裝失敗: {e}")
+        self._set_status(S("status_oem_checking"), "blue")
+        self._oem_check_ollama_installed()
+
+    def _oem_check_ollama_installed(self):
+        """OEM: 背景輪詢 /api/tags，偵測到 OLLAMA 後啟用 Pull 按鈕。"""
+        def _check():
+            try:
+                req = urllib.request.Request(f"{OLLAMA_BASE_URL}/api/tags")
+                with urllib.request.urlopen(req, timeout=2):
+                    pass
+                self.root.after(0, self._oem_ollama_ready)
+            except Exception:
+                self.root.after(5000, self._oem_check_ollama_installed)
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _oem_ollama_ready(self):
+        for btn in getattr(self, "_oem_pull_btns", []):
+            try:
+                btn.config(state="normal")
+            except Exception:
+                pass
+        self._set_status(S("status_oem_ollama_ready"), "green")
+
+    def _oem_hide_install_ui(self):
+        """Pull 完成後隱藏 OEM 安裝按鈕區塊。"""
+        for frame in getattr(self, "_oem_install_frames", []):
+            try:
+                frame.pack_forget()
+            except Exception:
+                pass
+
+    def _oem_pull_gemma(self):
+        """OEM: 下載 gemma4:12b-it-qat。"""
+        for btn in getattr(self, "_oem_pull_btns", []):
+            try:
+                btn.config(state="disabled")
+            except Exception:
+                pass
+        self._set_status(S("status_oem_pulling"), "orange")
+        def _pull():
+            try:
+                result = subprocess.run(
+                    ["ollama", "pull", "gemma4:12b-it-qat"],
+                    capture_output=True, text=True, timeout=3600
+                )
+                if result.returncode == 0:
+                    self.root.after(0, lambda: self._set_status(S("status_oem_pull_done"), "green"))
+                    self.root.after(0, self._refresh_ollama_models)
+                    self.root.after(0, self._oem_hide_install_ui)
+                else:
+                    err = (result.stderr or "未知錯誤")[:60]
+                    self.root.after(0, lambda: self._set_status(S("status_api_unknown"), "red"))
+                    log(f"[OEM] pull 失敗: {err}")
+                    for btn in getattr(self, "_oem_pull_btns", []):
+                        self.root.after(0, lambda b=btn: b.config(state="normal"))
+            except Exception as e:
+                self.root.after(0, lambda: self._set_status(S("status_api_unknown"), "red"))
+                log(f"[OEM] pull 例外: {e}")
+                for btn in getattr(self, "_oem_pull_btns", []):
+                    self.root.after(0, lambda b=btn: b.config(state="normal"))
+        threading.Thread(target=_pull, daemon=True).start()
+
+    def _stop_running_ollama_model(self):
+        """切換模型前先卸載目前在 VRAM 中的模型，釋放記憶體。"""
+        def _task():
+            try:
+                req = urllib.request.Request(f"{OLLAMA_BASE_URL}/api/ps")
+                with urllib.request.urlopen(req, timeout=3) as r:
+                    data = json.loads(r.read().decode())
+                for m in data.get("models", []):
+                    name = m.get("name", "")
+                    if name:
+                        subprocess.run(["ollama", "stop", name],
+                                       timeout=10, capture_output=True)
+                        log(f"[OLLAMA] 切換模型：已停止 {name}")
+                new_model = getattr(self, "ollama_model_var", None)
+                if new_model:
+                    log(f"[OLLAMA] 切換至：{new_model.get()}")
+            except Exception as e:
+                log(f"[OLLAMA] 停止模型失敗: {e}")
+        threading.Thread(target=_task, daemon=True).start()
+
     def _on_use_ollama_toggle(self, event=None):
+        self._stop_running_ollama_model()
         self.config["use_ollama"] = self.use_ollama_var.get()
         self.config["ollama_model"] = self.ollama_model_var.get()
         try:
@@ -6759,7 +7254,16 @@ class LangForgeApp:
                 result = call_ollama(model, image_pil, prompt, timeout=timeout,
                                      engine_type="simple")
             except Exception as e:
-                self._set_status(S("status_api_fail").format(msg=str(e)[:60]), "red")
+                err_str = str(e)
+                _oom_keywords = ("connection reset", "remotedisconnected", "broken pipe",
+                                 "eof", "connection refused", "connection aborted", "remote end closed")
+                if err_str == "OLLAMA_EMPTY_RESPONSE":
+                    self._set_status(S("status_ollama_empty_response"), "red")
+                    self._query_ollama_device()
+                elif any(k in err_str.lower() for k in _oom_keywords):
+                    self._set_status(S("status_ollama_oom_crash"), "red")
+                else:
+                    self._set_status(S("status_api_fail").format(msg=err_str[:60]), "red")
                 self._stamp_elapsed()
                 return
             if result:
@@ -6767,6 +7271,7 @@ class LangForgeApp:
                 self._show_simple_result(_build_simple_display_text(result))
                 self._set_status(S("status_done"), "green")
                 self._stamp_elapsed()
+                self._query_ollama_device()
             else:
                 self._show_simple_result("")
                 self._set_status(S("status_no_text_found"), "gray")
@@ -6824,6 +7329,9 @@ class LangForgeApp:
         for i in range(6):
             self.nb.tab(i, state=adv)
         self.nb.tab(6, state=sim)
+        # OEM 版永遠隱藏 Tab3（引擎配額）
+        if IS_OEM:
+            self.nb.tab(2, state="hidden")
         self.nb.select(6 if mode == "simple" else 0)
         if mode == "advanced":
             if getattr(self, "simple_auto_var", None):
@@ -7754,7 +8262,9 @@ class LangForgeApp:
                 return
             self._set_status(S("status_ollama_running").format(t=ollama_timeout), "orange")
             try:
+                _api_t0 = time.time()
                 res = call_ollama(ollama_model, image_pil, translate_prompt, timeout=ollama_timeout)
+                _api_elapsed = time.time() - _api_t0
                 if isinstance(res, list) and len(res) == 0:
                     self._set_status(S("status_ollama_empty"), "gray")
                     self._stamp_elapsed()
@@ -7766,7 +8276,11 @@ class LangForgeApp:
                 return
             except ValueError as e:
                 err_msg = str(e)
-                if err_msg.startswith("JSON_PARSE_FAIL|"):
+                if err_msg == "OLLAMA_EMPTY_RESPONSE":
+                    log(f"OLLAMA 空回應：model={ollama_model}")
+                    self._set_status(S("status_ollama_empty_response"), "red")
+                    self._query_ollama_device()
+                elif err_msg.startswith("JSON_PARSE_FAIL|"):
                     parts = err_msg.split("|", 2)
                     self._log_json_debug(
                         "ollama", ollama_model,
@@ -7780,16 +8294,25 @@ class LangForgeApp:
                 self._stamp_elapsed()
                 return
             except Exception as e:
-                log(f"OLLAMA 呼叫失敗: {e}")
-                self._set_status(S("status_ollama_fail").format(err=str(e)[:60]), "red")
+                err_str = str(e).lower()
+                _oom_keywords = ("connection reset", "remotedisconnected", "broken pipe",
+                                 "eof", "connection refused", "connection aborted", "remote end closed")
+                if any(k in err_str for k in _oom_keywords):
+                    log(f"OLLAMA 崩潰（可能 OOM）: {e}")
+                    self._set_status(S("status_ollama_oom_crash"), "red")
+                else:
+                    log(f"OLLAMA 呼叫失敗: {e}")
+                    self._set_status(S("status_ollama_fail").format(err=str(e)[:60]), "red")
                 self._stamp_elapsed()
                 return
             self.last_res = res
             self.config["used_today"][ollama_model] = self.config["used_today"].get(ollama_model, 0) + 1
             self._safe_save_config()
+            self._update_min_response(ollama_model, _api_elapsed)
             self._set_status(S("status_ollama_done").format(n=len(res)), "green")
-            self._stamp_elapsed()
+            self._stamp_elapsed(api_secs=_api_elapsed)
             log(f"OLLAMA ({ollama_model}) 翻譯成功，共 {len(res)} 段")
+            self._query_ollama_device()
             if source == "capture" and res:
                 self._save_translation_log(
                     res, ollama_model, win_title, image_pil,
@@ -7809,7 +8332,9 @@ class LangForgeApp:
         _api_call_failed = False
         try:
             caller = ENGINE_CALLERS[eng]
+            _api_t0 = time.time()
             res = caller(api_key, model, image_pil, translate_prompt)
+            _api_elapsed = time.time() - _api_t0
 
         except ValueError as e:
             # _parse_json_response 拋出的 JSON 解析失敗，包含原始回應
@@ -7819,7 +8344,7 @@ class LangForgeApp:
                 json_err = parts[1] if len(parts) > 1 else "unknown"
                 raw_text = parts[2] if len(parts) > 2 else ""
                 self._log_json_debug(eng, model, json_err, raw_text)
-                self._set_status(S("status_json_fail"), "red")
+                self._set_status(S("status_model_format_and_ocr"), "red")
             else:
                 log(f"ValueError: {err_msg}")
                 self._set_status(S("status_error").format(msg=err_msg[:60]), "red")
@@ -7882,6 +8407,15 @@ class LangForgeApp:
             # ── 401/403 認證失敗 ──
             elif "401" in err_str or "403" in err_str or "UNAUTHENTICATED" in err_str or "PERMISSION_DENIED" in err_str:
                 self._set_status(S("status_key_invalid_eng").format(engine=ENGINE_DISPLAY[eng]), "red")
+            # ── 404 找不到（含 NVCF 舊格式特判）──
+            elif "404" in err_str:
+                if "nvcf" in err_str.lower() or "Function '" in err_str:
+                    self._set_status(S("status_not_found_nvcf"), "red")
+                else:
+                    self._set_status(S("status_not_found"), "red")
+            # ── 422 不支援此功能 ──
+            elif "422" in err_str or "Unprocessable" in err_str:
+                self._set_status(S("status_unsupported"), "red")
             # ── 400 請求錯誤 ──
             elif "400" in err_str or "INVALID_ARGUMENT" in err_str:
                 self._set_status(S("status_bad_request"), "red")
@@ -7891,9 +8425,9 @@ class LangForgeApp:
             # ── 網路問題 ──
             elif "connect" in err_str.lower() or "timeout" in err_str.lower() or "ConnectionError" in err_str:
                 self._set_status(S("status_network_fail"), "red")
-            # ── 其他 ──
+            # ── 其他（不顯示原始錯誤）──
             else:
-                self._set_status(S("status_api_fail").format(msg=err_str[:60]), "red")
+                self._set_status(S("status_api_unknown"), "red")
             res = []
             _api_call_failed = True
 
@@ -7918,8 +8452,12 @@ class LangForgeApp:
                     self.config.setdefault("custom_quota", {})[model] = cur_limit
             self._safe_save_config()
             self.root.after(0, self._refresh_quota)
-            self._set_status(S("status_done"), "green")
-            self._stamp_elapsed()
+            if _detect_ocr_only(res, snap.get("snap_src_lang", "")):
+                self._set_status(S("status_model_ocr_only"), "orange")
+            else:
+                self._set_status(S("status_done"), "green")
+            self._update_min_response(model, _api_elapsed)
+            self._stamp_elapsed(api_secs=_api_elapsed)
             log(f"{model} 翻譯成功，共 {len(res)} 段")
 
             # 畫面擷取模式：儲存翻譯紀錄
@@ -8278,6 +8816,9 @@ class LangForgeApp:
             image_pil = image_pil.resize((out_w, out_h), Image.LANCZOS)
 
         # ── 座標診斷 LOG（DEBUG_COORD=True 時輸出）──
+        segments = [s for s in segments if isinstance(s, dict)]
+        if not segments:
+            return
         _all_sx = [float(s.get("x", 0)) for s in segments]
         _all_sy = [float(s.get("y", 0)) for s in segments]
         _group_px_x = max(_all_sx) > 1.0
@@ -8398,11 +8939,9 @@ class LangForgeApp:
             usable_w = out_w - PADDING * 2
             y_limit = out_h - PADDING
 
-            sim_col_next_y = {}
+            sim_placed = []
             sim_ok = True
             for tw, sx, sy in items:
-                col = int(sx * 8) if not is_vertical else 0
-                col_next = sim_col_next_y.get(col, PADDING)
                 draw_x = PADDING if is_vertical else max(PADDING, int(sx * out_w))
                 text_w = out_w - draw_x - PADDING
                 if text_w < 30:
@@ -8412,24 +8951,16 @@ class LangForgeApp:
                 cpl = max(1, int(text_w / avg_cw))
                 nlines = max(1, -(-len(tw) // cpl))
                 block_h = nlines * line_h + 2
+                # 實際佔用寬度：單行只佔文字本身，多行才吃滿換行寬度
+                text_px = text_w if nlines > 1 else min(text_w, _text_px(font, tw, avg_cw))
 
                 raw_y = int(sy * out_h)
-                # 同欄內：若 raw_y 在 col_next 的 2 倍行高以內，視為連續行往下推
-                # 否則視為新區塊，直接使用 raw_y（避免跨對話框的段落互相干擾）
-                if raw_y >= col_next + line_h * 2:
-                    target_y = raw_y
-                elif raw_y >= col_next:
-                    target_y = raw_y
-                else:
-                    target_y = col_next
+                target_y = _resolve_overlap_y(draw_x, draw_x + text_px, raw_y, block_h, sim_placed)
 
-                if target_y + block_h <= y_limit:
-                    sim_col_next_y[col] = target_y + block_h
-                else:
-                    sim_col_next_y[col] = col_next + block_h
-                    if sim_col_next_y[col] > out_h:
-                        sim_ok = False
-                        break
+                if target_y + block_h > out_h:
+                    sim_ok = False
+                    break
+                sim_placed.append((draw_x, target_y, draw_x + text_px, target_y + block_h))
 
             if sim_ok:
                 break
@@ -8445,31 +8976,23 @@ class LangForgeApp:
         # ── 繪製譯文 ──
         line_h = font_size + 4
         y_limit = out_h - PADDING
-        col_next_y = {}
+        placed = []
 
         for tw, sx, sy in items:
             draw_x = PADDING if is_vertical else max(PADDING, int(sx * out_w))
-            col = 0 if is_vertical else int(sx * 8)
-            col_next = col_next_y.get(col, PADDING)
-
-            raw_y = int(sy * out_h)
-            # 同欄內：若 raw_y 在 col_next 的 2 倍行高以內，視為連續行往下推
-            # 否則視為新區塊，直接使用 raw_y（避免跨對話框的段落互相干擾）
-            # 額外：若 raw_y 已超過 col_next 足夠多，代表是新的 UI 區塊，重置防疊
-            if raw_y >= col_next + line_h * 2:
-                draw_y = raw_y  # 新區塊，直接使用 AI 給的 y
-            elif raw_y >= col_next:
-                draw_y = raw_y  # 有空間，直接用 raw_y
-            else:
-                draw_y = col_next  # 真正的疊字才往下推
-
             text_w = out_w - draw_x - PADDING
             if text_w < 30:
                 draw_x = PADDING
+                text_w = out_w - draw_x - PADDING
             avg_cw = font_size * 0.55
-            cpl = max(1, int((out_w - draw_x - PADDING) / avg_cw)) if avg_cw > 0 else 1
+            cpl = max(1, int(text_w / avg_cw)) if avg_cw > 0 else 1
             nlines = max(1, -(-len(tw) // cpl))
             block_h = nlines * (font_size + 4) + 2
+            # 實際佔用寬度：單行只佔文字本身，多行才吃滿換行寬度
+            text_px = text_w if nlines > 1 else min(text_w, _text_px(font, tw, avg_cw))
+
+            raw_y = int(sy * out_h)
+            draw_y = _resolve_overlap_y(draw_x, draw_x + text_px, raw_y, block_h, placed)
 
             if draw_y + block_h > y_limit:
                 draw_y = max(PADDING, y_limit - block_h)
@@ -8478,7 +9001,7 @@ class LangForgeApp:
             draw_wrapped_text_safe(draw, tw, draw_x, draw_y, font, out_w, out_h, "white")
             if DEBUG_COORD:
                 log(f"[COORD] 繪製 ({draw_x},{draw_y}) norm_x={sx:.3f} norm_y={sy:.3f} raw_y={int(sy*out_h)} final_y={draw_y} | {tw[:12]!r}")
-            col_next_y[col] = draw_y + block_h
+            placed.append((draw_x, draw_y, draw_x + text_px, draw_y + block_h))
 
         if source == "capture":
             self.display.geometry(f"{out_w}x{out_h}")
