@@ -1,4 +1,4 @@
-"""LangForge V1.5.6
+"""LangForge V1.5.11
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -30,23 +30,66 @@ import win32gui
 # 三層環境自動偵測
 # ==========================================
 IS_FROZEN = getattr(sys, 'frozen', False)  # PyInstaller 標記
-IS_OEM = True   # OEM 版旗標：True=鑫鵬瑜版，False=公開版
-# ── OEM LOGO 從 logo.txt 載入（放在 LangForge.py 同目錄）──
-def _load_oem_logos():
-    import os, base64 as _b64
-    _dir = os.path.dirname(sys.executable if IS_FROZEN else os.path.abspath(__file__))
-    _path = os.path.join(_dir, "logo.txt")
-    _logos = {"H": "", "ABOUT": "", "V": ""}
+
+# ── 隱藏 console 視窗 ──
+# spec 用 console=True 打包：console=False（windowed）會讓 onefile bootloader
+# 在部分機器上啟動失敗（Failed to import encodings module）。改用 console=True
+# 再於此處隱藏視窗，是已驗證可行的替代方案。視窗會短暫閃現後消失。
+# 未取得 Code Signing 憑證前維持此作法；簽章後可改回 console=False 並移除本段。
+if IS_FROZEN:
     try:
-        with open(_path, "r") as _f:
-            for _line in _f:
-                _line = _line.strip()
-                if ":" in _line:
-                    _k, _v = _line.split(":", 1)
-                    if _k in _logos:
-                        _logos[_k] = _v
+        _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if _hwnd:
+            ctypes.windll.user32.ShowWindow(_hwnd, 0)  # SW_HIDE
     except Exception:
-        pass
+        pass  # 隱藏失敗只是多一個視窗，不該讓程式無法啟動
+
+IS_OEM = False   # OEM 版旗標：True=鑫鵬瑜版，False=公開版
+OEM_ICON_NAME = "Xinpengyu-Tec-INC.ico"  # OEM 版圖示檔名；spec 的 datas 與 icon= 需用同一個檔
+# ── OEM 評估期限制（僅 IS_OEM=True 生效）──
+# 屆期後停止呼叫 OLLAMA。解除方式只有一種：改下面的日期或關閉 IS_OEM，然後重新打包。
+OEM_LICENSE_EXPIRY = "2027-01-01"   # 當地時間該日零時起失效
+OEM_LICENSE_WARN_DAYS = 10          # 屆期前幾天開始在標題列顯示倒數
+
+
+def _oem_license_days_left():
+    """回傳距離評估期屆期的天數。IS_OEM=False 或日期無法解析時回傳 None。
+    0 = 今天是最後一天；負數 = 已屆期。
+    """
+    if not IS_OEM:
+        return None
+    try:
+        from datetime import datetime
+        return (datetime.strptime(OEM_LICENSE_EXPIRY, "%Y-%m-%d") - datetime.now()).days
+    except Exception:
+        return None  # 解析失敗時不阻擋，避免把常數打錯就讓整支程式不能用
+# ── OEM LOGO 從 logo.txt 載入（放在 LangForge.py 同目錄）──
+_OEM_LOGO_STATUS = ""
+def _load_oem_logos():
+    import os
+    global _OEM_LOGO_STATUS
+    # 搜尋順序：模組同層（打包後為 _MEIPASS/langforge/core）→ _MEIPASS 根 → EXE 同層
+    _dirs = [os.path.dirname(os.path.abspath(__file__))]
+    if IS_FROZEN:
+        _dirs += [d for d in (getattr(sys, "_MEIPASS", ""),
+                              os.path.dirname(sys.executable)) if d]
+    _logos = {"H": "", "ABOUT": "", "V": ""}
+    _errs = []
+    for _dir in _dirs:
+        _path = os.path.join(_dir, "logo.txt")
+        try:
+            with open(_path, "r") as _f:
+                for _line in _f:
+                    _line = _line.strip()
+                    if ":" in _line:
+                        _k, _v = _line.split(":", 1)
+                        if _k in _logos:
+                            _logos[_k] = _v
+            _OEM_LOGO_STATUS = f"logo.txt 載入成功: {_path}"
+            return _logos
+        except Exception as _e:
+            _errs.append(f"{_path} ({type(_e).__name__})")
+    _OEM_LOGO_STATUS = "logo.txt 載入失敗，LOGO 將不顯示 → " + " / ".join(_errs)
     return _logos
 
 _OEM_LOGOS = _load_oem_logos()
@@ -151,17 +194,22 @@ def _save_emulators(data: dict):
 # 應用程式圖示
 # ==========================================
 def _load_app_icon(window) -> None:
-    """將 favicon.ico 套用至指定視窗的標題列與工作列。
-    favicon.ico 需與程式放在同一目錄；找不到時靜默略過，不影響程式運作。
+    """將應用程式圖示套用至指定視窗的標題列與工作列。
+    OEM 版優先找 OEM_ICON_NAME，找不到才退回 favicon.ico；兩者皆無則靜默略過。
     優先使用 iconbitmap（Windows 原生 .ico 支援）；
     失敗時退回 iconphoto（跨平台備案，以 Pillow 轉換）。
     """
+    # OEM 版先找自家圖示；檔名需與 spec datas 放進去的一致
+    _names = [OEM_ICON_NAME, "favicon.ico"] if IS_OEM else ["favicon.ico"]
+
     # 嘗試多個可能的位置
     possible_paths = [
-        os.path.join(ASSET_ICONS_DIR, "favicon.ico"),  # 模組化結構
-        os.path.join(BASE_DIR, "favicon.ico"),          # 根目錄
-        "favicon.ico",                                   # 當前目錄
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "favicon.ico"),  # 檔案同目錄
+        os.path.join(d, n)
+        for n in _names
+        for d in (ASSET_ICONS_DIR,                                  # 模組化結構
+                  BASE_DIR,                                          # 根目錄
+                  "",                                                # 當前目錄
+                  os.path.dirname(os.path.abspath(__file__)))        # 檔案同目錄
     ]
     
     ico_path = None
@@ -191,8 +239,8 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.5.6"
-DEBUG_COORD = True  # True = 輸出座標診斷 log（開發用，發布前設為 False）
+ABOUT_VERSION = "V1.5.11"
+DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
 ABOUT_LICENSE = "Copyright © 2026 GoOnSoft. All rights reserved."
@@ -219,8 +267,12 @@ UI_STRINGS = {
         "cb_simple_auto": "自動翻譯",
         "lbl_simple_color": "字幕顏色:",
         "color_white": "白", "color_yellow": "黃", "color_red": "紅", "color_blue": "藍", "color_green": "綠",
-        "lbl_simple_bg_color": "底色:", "color_bg_black": "黑", "color_bg_white": "白底",
+        "lbl_simple_bg_color": "底色:", "color_bg_black": "黑", "color_bg_white": "白",
         "lbl_simple_font_size": "字級:",
+        "lbl_simple_width": "寬度:",
+        "status_oem_expired": "授權評估期已於 {date} 屆期，請聯繫 作者",
+        "oem_countdown": "授權評估期剩餘 {days} 天",
+        "lvl_xs": "最小", "lvl_s": "小", "lvl_m": "中", "lvl_l": "大", "lvl_xl": "最大",
         # ── Tab1 翻譯操作 ──
         "lbl_engine": "翻譯引擎:",
         "lbl_trans_options": "翻譯選項",
@@ -573,6 +625,10 @@ UI_STRINGS = {
         "color_white": "W", "color_yellow": "Y", "color_red": "R", "color_blue": "B", "color_green": "G",
         "lbl_simple_bg_color": "BG:", "color_bg_black": "Dark", "color_bg_white": "Light",
         "lbl_simple_font_size": "Size:",
+        "lbl_simple_width": "Width:",
+        "status_oem_expired": "Evaluation licence expired on {date}. Please contact the author.",
+        "oem_countdown": "Evaluation licence: {days} days left",
+        "lvl_xs": "XS", "lvl_s": "S", "lvl_m": "M", "lvl_l": "L", "lvl_xl": "XL",
         # ── Tab1 ──
         "lbl_engine": "Engine:",
         "lbl_trans_options": "Translation Options",
@@ -1022,7 +1078,10 @@ OLLAMA_IMG_QUALITY = 70
 IMG_OLLAMA_MEDIUM = (OLLAMA_IMG_WIDTH, OLLAMA_IMG_QUALITY)
 IMG_OLLAMA_LARGE  = (OLLAMA_IMG_WIDTH, OLLAMA_IMG_QUALITY)
 IMG_SIMPLE        = (448, 70)
-_FONT_LEVEL_SIZES = {1: 48, 2: 36, 3: 24, 4: 18, 5: 13}  # 5 級字型，1=最大  # ponytail: 簡易模式不縮圖，本地推理無頻寬瓶頸，辨識率優先
+_FONT_LEVEL_SIZES = {1: 13, 2: 18, 3: 24, 4: 36, 5: 48}  # 5 級字型，1=最小（與寬度同方向）  # ponytail: 簡易模式不縮圖，本地推理無頻寬瓶頸，辨識率優先
+# 簡易模式輸出視窗寬度（螢幕寬度比例），5=最大=原本的固定值
+# 1(0.40) 在字級 3 可容納約 30 個中文字；再窄會讓大字級頻繁換行
+_WIDTH_LEVEL_RATIOS = {1: 0.40, 2: 0.50, 3: 0.60, 4: 0.70, 5: 0.80}
 
 # ============================================================
 # OLLAMA 推理參數（可手動調整，None = 自動偵測或使用 OLLAMA 預設）
@@ -1030,11 +1089,11 @@ _FONT_LEVEL_SIZES = {1: 48, 2: 36, 3: 24, 4: 18, 5: 13}  # 5 級字型，1=最�
 
 # 【token 上限】影響：速度 + 正確率
 # 控制模型最多能生成幾個 token（thinking + JSON 輸出合計）
-# 太小 → thinking 跑一半被截斷，輸出空或不完整
-# 太大 → 等待時間變長，但成功率略高
-# CUDA 建議 4096（約 60-90 秒），Vulkan 建議 8192（約 90-150 秒）
-OLLAMA_NUM_PREDICT_CUDA   = None   # None=自動(4096)；可手動設 2048/4096/8192
-OLLAMA_NUM_PREDICT_VULKAN = None   # None=自動(8192)；可手動設 4096/8192
+# 注意：OLLAMA 預設 num_ctx = 4096，prompt + 生成 合計超過就會被截斷
+#       （done_reason=length、content 為空），因此設超過 4096 不會生效。
+# 實測：640px 截圖的 prompt 約佔 1632 token，可生成空間約 2400 token。
+OLLAMA_NUM_PREDICT_CUDA   = None   # None=自動(4096)；可手動設 1024/2048/4096
+OLLAMA_NUM_PREDICT_VULKAN = None   # None=自動(4096)；非 NVIDIA 平台適用
 
 # 【推理溫度】影響：正確率 + 穩定性
 # 控制模型輸出的隨機程度
@@ -2199,10 +2258,44 @@ OLLAMA_VISION_KEYWORDS = [
 
 _OLLAMA_NUM_PREDICT: int | None = None
 _IS_NVIDIA_GPU: bool | None = None
+_INFER_BACKEND_CACHE = None   # (device_name, library) —— 每次執行只讀一次
+
+
+def _detect_infer_backend():
+    """從 OLLAMA server.log 讀取推理後端與顯示卡名稱。
+    回傳 (device_name, library)；讀不到回傳 (None, None)。結果快取。
+    """
+    global _INFER_BACKEND_CACHE
+    if _INFER_BACKEND_CACHE is not None:
+        return _INFER_BACKEND_CACHE
+    dev = lib = None
+    try:
+        path = os.path.join(os.environ["LOCALAPPDATA"], "Ollama", "server.log")
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if "inference compute" not in line:
+                    continue
+                m_lib = re.search(r"library=(\S+)", line)
+                if not m_lib:
+                    continue
+                lib = m_lib.group(1)
+                # 新版：description="AMD Radeon RX 9060 XT"（name= 是內部 id）
+                # 舊版：name="NVIDIA GeForce RTX 3050 Laptop GPU"
+                m_dev = re.search(r'description="([^"]+)"', line) or \
+                        re.search(r'name="([^"]+)"', line)
+                dev = m_dev.group(1) if m_dev else None
+        log(f"[OLLAMA] 推理後端偵測: library={lib!r} device={dev!r}")
+    except Exception as e:
+        log(f"[OLLAMA] 推理後端偵測失敗: {e}")
+    _INFER_BACKEND_CACHE = (dev, lib)   # 失敗也快取，避免每次翻譯重讀
+    return _INFER_BACKEND_CACHE
 
 
 def _detect_ollama_num_predict() -> int:
-    """WMI 偵測 GPU 廠牌：NVIDIA(CUDA)→4096，AMD/其他(Vulkan)→8192。"""
+    """WMI 偵測 GPU 廠牌，決定手動覆蓋要套用 CUDA 還是非 CUDA 那組。
+    num_predict 兩邊都是 4096：OLLAMA 預設 num_ctx 為 4096，
+    設更大的值不可能生效（context 會先被填滿）。
+    """
     global _OLLAMA_NUM_PREDICT, _IS_NVIDIA_GPU
     if _OLLAMA_NUM_PREDICT is not None:
         return _OLLAMA_NUM_PREDICT
@@ -2216,12 +2309,12 @@ def _detect_ollama_num_predict() -> int:
         )
         gpu_name = r.stdout.strip()
         _IS_NVIDIA_GPU = bool(gpu_name)  # 有找到 NVIDIA 卡就是 True
-        log(f"[OLLAMA] WMI GPU 偵測: {gpu_name!r} → {'NVIDIA/CUDA' if _IS_NVIDIA_GPU else '非NVIDIA/Vulkan'}")
-        _OLLAMA_NUM_PREDICT = 4096 if _IS_NVIDIA_GPU else 8192
+        log(f"[OLLAMA] WMI GPU 偵測: {gpu_name!r} → {'NVIDIA/CUDA' if _IS_NVIDIA_GPU else '非NVIDIA'}")
+        _OLLAMA_NUM_PREDICT = 4096
     except Exception:
         _IS_NVIDIA_GPU = False
-        _OLLAMA_NUM_PREDICT = 8192
-    backend = "CUDA" if _IS_NVIDIA_GPU else "Vulkan/其他"
+        _OLLAMA_NUM_PREDICT = 4096
+    backend = "CUDA" if _IS_NVIDIA_GPU else "非CUDA"
     log(f"[OLLAMA] num_predict 自動選擇: {_OLLAMA_NUM_PREDICT} ({backend})")
     return _OLLAMA_NUM_PREDICT
 
@@ -2240,6 +2333,11 @@ def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOU
     """OLLAMA 原生 /api/chat 視覺呼叫。
     以獨立執行緒發送請求，主執行緒等待 timeout 秒；逾時則拋出 TimeoutError。
     """
+    # OEM 評估期屆期後不再發出任何推理請求（唯一檢查點）
+    _days_left = _oem_license_days_left()
+    if _days_left is not None and _days_left < 0:
+        log(f"[OEM] 授權評估期已於 {OEM_LICENSE_EXPIRY} 屆期，停止 OLLAMA 呼叫")
+        raise ValueError("OEM_LICENSE_EXPIRED")
 
     image_pil, quality = _prepare_img_for_engine(image_pil, engine_type)
     img_b64 = _img_to_jpeg_b64(image_pil, quality)
@@ -2294,6 +2392,13 @@ def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOU
             with urllib.request.urlopen(req, timeout=timeout + 5) as resp:
                 raw = resp.read().decode("utf-8")
             result_holder[0] = raw
+        except urllib.error.HTTPError as exc:
+           # Ollama 的 4xx/5xx 會在 body 說明原因，不讀出來 log 只剩狀態碼
+            try:
+                _body = exc.read().decode("utf-8", "replace")[:300]
+            except Exception:
+                _body = ""
+            result_holder[0] = RuntimeError(f"HTTP {exc.code}: {_body or exc.reason}")
         except Exception as exc:
             result_holder[0] = exc
         finally:
@@ -2315,7 +2420,15 @@ def call_ollama(model: str, image_pil, prompt: str, timeout: int = OLLAMA_TIMEOU
 
     result = json.loads(outcome)
     text = result.get("message", {}).get("content", "")
+    _done = result.get("done_reason", "?")
+    _pe = result.get("prompt_eval_count", 0)
+    _ec = result.get("eval_count", 0)
+    _tk = len(result.get("message", {}).get("thinking") or "")
+    log(f"[OLLAMA] done_reason={_done} prompt_eval={_pe} eval={_ec} 合計={_pe + _ec} thinking字數={_tk}")
     if not text.strip():
+        if _done == "length":
+            log("[OLLAMA] ⚠ 回應被 context 截斷：thinking 佔滿 num_ctx，content 沒有空間輸出。"
+                "OLLAMA 預設 num_ctx=4096，請改用不思考的模型（如 qwen2.5vl）。")
         raise ValueError("OLLAMA_EMPTY_RESPONSE")
     log(f"[OLLAMA] 原始回應前1000字: {text[:1000]!r}")
     return _parse_json_response(text)
@@ -2935,7 +3048,20 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.5.6")
+        self.root.title("LangForge  V1.5.11")
+        _days_left = _oem_license_days_left()
+        if _days_left is not None:
+            if _days_left < 0:
+                self.root.title("LangForge  V1.5.11  －  " + S("status_oem_expired").format(
+                    date=OEM_LICENSE_EXPIRY.replace("-", "/")))
+                log(f"[OEM] 授權評估期已於 {OEM_LICENSE_EXPIRY} 屆期")
+            elif _days_left <= OEM_LICENSE_WARN_DAYS:
+                self.root.title("LangForge  V1.5.11  －  " + S("oem_countdown").format(days=_days_left))
+                log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
+            else:
+                log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
+        if IS_OEM and _OEM_LOGO_STATUS:
+            log(f"[OEM] {_OEM_LOGO_STATUS}")
         _load_app_icon(self.root)
 
         global CURRENT_LANG
@@ -3032,12 +3158,15 @@ class LangForgeApp:
                     _wm_data = _b64.b64decode(_OEM_LOGO_V)
                     _wm_img = _Img.open(_io.BytesIO(_wm_data))
                     # 調整浮水印尺寸（修改 _WM_W/_WM_H 即可，不需重產 logo.txt）
-                    _WM_W, _WM_H = 150, 110
+                    # 150x84 = logo.txt 內 V: 的原始比例 1.78，改動時請一併維持比例
+                    _WM_W, _WM_H = 150, 84
                     _wm_img = _wm_img.resize((_WM_W, _WM_H), _Img.LANCZOS)
                     self._oem_logo_v_photo = _ITk.PhotoImage(_wm_img)
-                    _wm_lbl = tk.Label(root, image=self._oem_logo_v_photo,
-                                       bd=0, highlightthickness=0)
-                    _wm_lbl.place(relx=1.0, rely=1.0, anchor="ne", x=-10, y=-120)
+                    self._oem_wm_lbl = tk.Label(root, image=self._oem_logo_v_photo,
+                                                bd=0, highlightthickness=0, bg=root.cget("bg"))
+                    # 建立時必為 idx 0 或 6（_apply_ui_mode 只會 select 這兩個），故直接顯示
+                    # 注意：_on_tab_changed 內的 place 參數必須與此處完全一致
+                    self._oem_wm_lbl.place(relx=1.0, rely=1.0, anchor="ne", x=-10, y=-120)
                 except Exception:
                     pass
             root.after(300, _place_watermark)
@@ -3194,11 +3323,26 @@ class LangForgeApp:
         ttk.Label(size_row, text=S("lbl_simple_font_size"), font=("Arial", 9)).pack(side="left")
         self._simple_size_btns = {}
         _cur_sz = self.config.get("simple_font_size", 3)
-        for level in range(1, 6):
-            btn = ttk.Button(size_row, text=f"{level}*" if level == _cur_sz else str(level),
-                             width=3, command=lambda l=level: self._set_simple_font_size(l))
+        for level, key in [(1, "lvl_xs"), (2, "lvl_s"), (3, "lvl_m"),
+                           (4, "lvl_l"), (5, "lvl_xl")]:
+            label = S(key)
+            btn = ttk.Button(size_row, text=f"{label}*" if level == _cur_sz else label,
+                             width=5, command=lambda l=level: self._set_simple_font_size(l))
             btn.pack(side="left", padx=2)
-            self._simple_size_btns[level] = btn
+            self._simple_size_btns[level] = (btn, label)
+        # 寬度選擇
+        width_row = ttk.Frame(act_lf)
+        width_row.pack(fill="x", padx=6, pady=(2, 2))
+        ttk.Label(width_row, text=S("lbl_simple_width"), font=("Arial", 9)).pack(side="left")
+        self._simple_width_btns = {}
+        _cur_w = self.config.get("simple_width_level", 5)
+        for level, key in [(1, "lvl_xs"), (2, "lvl_s"), (3, "lvl_m"),
+                           (4, "lvl_l"), (5, "lvl_xl")]:
+            label = S(key)
+            btn = ttk.Button(width_row, text=f"{label}*" if level == _cur_w else label,
+                             width=5, command=lambda l=level: self._set_simple_width(l))
+            btn.pack(side="left", padx=2)
+            self._simple_width_btns[level] = (btn, label)
         btn_row7 = ttk.Frame(act_lf)
         btn_row7.pack(fill="x", padx=6, pady=(2, 6))
         self.simple_auto_var = tk.BooleanVar(value=False)
@@ -4280,6 +4424,13 @@ class LangForgeApp:
     def _on_tab_changed(self, event):
         nb = event.widget
         idx = nb.index("current")
+        # OEM 浮水印只在 Tab1（翻譯操作）與 Tab7（簡易模式）顯示
+        _wm = getattr(self, "_oem_wm_lbl", None)   # 非 OEM 版不存在，必須用 getattr
+        if _wm is not None:
+            if idx in (0, 6):
+                _wm.place(relx=1.0, rely=1.0, anchor="ne", x=-10, y=-120)
+            else:
+                _wm.place_forget()
         if idx == 2:  # Tab 3 — 引擎配額
             self._refresh_quota_table()
         elif idx == 3:  # Tab 4 — 歷史翻譯
@@ -6898,24 +7049,12 @@ class LangForgeApp:
                         result = "CPU"
                         color = "orange"
                     else:
-                        # 嘗試 nvidia-smi 判斷是否為 NVIDIA / CUDA
-                        gpu_name = ""
-                        backend = "Vulkan"  # AMD / Intel / 其他 → Vulkan
-                        try:
-                            out = subprocess.run(
-                                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                                capture_output=True, text=True, timeout=3
-                            )
-                            if out.returncode == 0 and out.stdout.strip():
-                                gpu_name = out.stdout.strip().splitlines()[0].strip()
-                                backend = "CUDA"
-                        except Exception:
-                            pass
-
-                        if gpu_name:
-                            result = f"{gpu_name} | {backend} | {gpu_pct}%"
+                        dev_name, backend = _detect_infer_backend()
+                        # size_vram > 0 卻讀到 library=cpu，代表 log 是舊紀錄，不信任
+                        if dev_name and backend and backend.lower() != "cpu":
+                            result = f"{dev_name} | {backend} | {gpu_pct}%"
                         else:
-                            result = f"GPU | {backend} | {gpu_pct}%"
+                            result = f"GPU | {gpu_pct}%"
                         color = "green"
             except Exception:
                 result = S("lbl_device_unknown")
@@ -7136,8 +7275,9 @@ class LangForgeApp:
         except Exception:
             taskbar_top = sh - 40
         win_h = 150
-        win_w = int(sw * 0.8)
-        win_x = int(sw * 0.1)
+        _wlv = self.config.get("simple_width_level", 5)
+        win_w = int(sw * _WIDTH_LEVEL_RATIOS.get(_wlv, 0.80))
+        win_x = int((sw - win_w) / 2)
         self._simple_win_default_geom = f"{win_w}x{win_h}+{win_x}+{taskbar_top - win_h}"
         win.geometry(self._simple_win_default_geom)
         bg = self.config.get("simple_bg_color", "black")
@@ -7219,14 +7359,54 @@ class LangForgeApp:
             except Exception:
                 pass
 
+    def _set_simple_width(self, level: int):
+        self.config["simple_width_level"] = level
+        save_config(self.config)
+        for l, (btn, label) in getattr(self, "_simple_width_btns", {}).items():
+            try:
+                btn.config(text=f"{label}*" if l == level else label)
+            except Exception:
+                pass
+        # 視窗已開著就即時套用：寬度與水平置中重算，高度不變
+        win = getattr(self, "_simple_win", None)
+        if not win:
+            return
+        try:
+            if not win.winfo_exists():
+                return
+            sw = self.root.winfo_screenwidth()
+            win_w = int(sw * _WIDTH_LEVEL_RATIOS.get(level, 0.80))
+            win_h = win.winfo_height() or 150
+            win_x = int((sw - win_w) / 2)
+            win.geometry(f"{win_w}x{win_h}+{win_x}+{win.winfo_y()}")
+            # 雙擊還原用的預設位置也要跟著改寬，否則還原會跳回舊寬度
+            _old = getattr(self, "_simple_win_default_geom", "")
+            if _old and _old.count("+") >= 2:
+                self._simple_win_default_geom = f"{win_w}x{win_h}+{win_x}+{_old.rsplit('+', 1)[-1]}"
+            self._simple_lbl.config(wraplength=win_w - 40)
+            # 換行寬度變了，重跑一次縮字讓現有內容重新排版
+            if self._simple_lbl.cget("text"):
+                self._show_simple_result(self._simple_lbl.cget("text"))
+        except Exception:
+            pass
+
     def _set_simple_font_size(self, level: int):
         self.config["simple_font_size"] = level
         save_config(self.config)
-        for l, btn in getattr(self, "_simple_size_btns", {}).items():
+        for l, (btn, label) in getattr(self, "_simple_size_btns", {}).items():
             try:
-                btn.config(text=f"{l}*" if l == level else str(l))
+                btn.config(text=f"{label}*" if l == level else label)
             except Exception:
                 pass
+        # 視窗已開著就即時重繪，否則要等下一次翻譯才看得到變化
+        win = getattr(self, "_simple_win", None)
+        if not win:
+            return
+        try:
+            if win.winfo_exists() and self._simple_lbl.cget("text"):
+                self._show_simple_result(self._simple_lbl.cget("text"))
+        except Exception:
+            pass
 
     def _simple_translate(self, image_pil=None):
         log("[簡易模式] 單次翻譯觸發")
@@ -7257,6 +7437,11 @@ class LangForgeApp:
                 err_str = str(e)
                 _oom_keywords = ("connection reset", "remotedisconnected", "broken pipe",
                                  "eof", "connection refused", "connection aborted", "remote end closed")
+                if err_str == "OEM_LICENSE_EXPIRED":
+                    self._set_status(S("status_oem_expired").format(
+                        date=OEM_LICENSE_EXPIRY.replace("-", "/")), "red")
+                    self._stamp_elapsed()
+                    return
                 if err_str == "OLLAMA_EMPTY_RESPONSE":
                     self._set_status(S("status_ollama_empty_response"), "red")
                     self._query_ollama_device()
@@ -8276,6 +8461,11 @@ class LangForgeApp:
                 return
             except ValueError as e:
                 err_msg = str(e)
+                if err_msg == "OEM_LICENSE_EXPIRED":
+                    self._set_status(S("status_oem_expired").format(
+                        date=OEM_LICENSE_EXPIRY.replace("-", "/")), "red")
+                    self._stamp_elapsed()
+                    return
                 if err_msg == "OLLAMA_EMPTY_RESPONSE":
                     log(f"OLLAMA 空回應：model={ollama_model}")
                     self._set_status(S("status_ollama_empty_response"), "red")
