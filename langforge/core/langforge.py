@@ -1577,14 +1577,21 @@ def _build_simple_display_text(segments: list) -> str:
 
 
 def _detect_ocr_only(segments: list, src_lang: str) -> bool:
-    """偵測模型是否只做 OCR 未翻譯：tw 含來源語言字元（日文假名等）即判定。"""
+    """偵測模型是否只做 OCR 未翻譯：tw 的假名字元佔比過高即判定。
+    專有名詞（角色名等）依 prompt 規定保留假名，故看佔比而非有無，
+    避免「パパス: It's still too dangerous...」這類正確翻譯被誤判。"""
     if "japanese" not in src_lang.lower() and "日文" not in src_lang:
         return False
     kana = re.compile(r'[\u3041-\u309F\u30A1-\u30FF]')
     if not segments:
         return False
-    kana_count = sum(1 for s in segments if kana.search(s.get("tw", "")))
-    return kana_count > len(segments) * 0.5
+    def _is_untranslated(text: str) -> bool:
+        text = text.strip()
+        if not text:
+            return False
+        return len(kana.findall(text)) > len(text) * 0.3
+    untranslated = sum(1 for s in segments if _is_untranslated(s.get("tw", "")))
+    return untranslated > len(segments) * 0.5
 
 
 def build_translate_prompt(src_lang: str, tgt_lang: str) -> str:
@@ -6199,6 +6206,8 @@ class LangForgeApp:
                     self._do_combined_translate(img, title, **snaps)
             except Exception as e:
                 log(f"[Worker] 執行失敗: {e}")
+                self._set_status(S("status_api_unknown"), "red")
+                self._stamp_elapsed()
             finally:
                 _request_queue.task_done()
                 self.root.after(0, lambda: self._update_queue_label(_request_queue.qsize()))
@@ -8646,7 +8655,7 @@ class LangForgeApp:
                     self.config.setdefault("custom_quota", {})[model] = cur_limit
             self._safe_save_config()
             self.root.after(0, self._refresh_quota)
-            if _detect_ocr_only(res, snap.get("snap_src_lang", "")):
+            if _detect_ocr_only(res, task.get("snap_src_lang", "")):
                 self._set_status(S("status_model_ocr_only"), "orange")
             else:
                 self._set_status(S("status_done"), "green")
