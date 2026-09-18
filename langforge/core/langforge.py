@@ -4765,7 +4765,11 @@ class LangForgeApp:
                     f"{S('status_ocr_running')} | {_lang_label(src_lang)} → {_lang_label(tgt_lang)}",
                     "orange"
                 )
-                import easyocr, numpy as np
+                try:
+                    import easyocr, numpy as np
+                except ImportError:
+                    self._set_status(S("status_ocr_no_easyocr"), "red")
+                    return
 
                 ocr_langs = _bcp47_to_easyocr(LANG_TO_BCP47.get(src_lang, "ja"))
                 if not hasattr(self, "_easyocr_reader") or self._easyocr_langs != ocr_langs:
