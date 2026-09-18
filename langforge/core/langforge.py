@@ -1396,7 +1396,7 @@ for models in ENGINE_MODELS.values():
 
 
 _LOG_FILE = os.path.join(os.path.dirname(sys.executable if IS_FROZEN else __file__), "langforge.log")
-_log_fh = open(_LOG_FILE, "a", encoding="utf-8", buffering=1) if IS_FROZEN else None
+_log_fh = open(_LOG_FILE, "a", encoding="utf-8", buffering=1) if (IS_FROZEN and IS_OEM) else None  # 公開版不寫 log 檔
 
 
 def log(msg):
