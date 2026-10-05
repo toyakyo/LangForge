@@ -1,4 +1,4 @@
-"""LangForge V1.5.11
+"""LangForge V1.5.12
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -239,12 +239,14 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.5.11"
+ABOUT_VERSION = "V1.5.12"
 DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
 ABOUT_LICENSE = "Copyright © 2026 GoOnSoft. All rights reserved."
 TUTORIAL_URL = "https://goonsoft.tw2.nde.tw/tutorial/tutorial.php"
+# 檢查更新：讀取此 JSON {"version": "V1.5.13", "url": "下載頁"}（僅提醒，不下載）
+UPDATE_URL = "https://goonsoft.tw2.nde.tw/tutorial/version.json"
 
 # ==========================================
 # 多語系 UI 字串
@@ -404,6 +406,8 @@ UI_STRINGS = {
         "btn_auto_cap_off": "自動擷取",
         "btn_auto_cap_tooltip": "自動擷取功能請至「擷取設定」頁籤中開啟",
         "btn_clear_queue": "清空要求任務",
+        "btn_abandon_task": "放棄本次任務",
+        "status_task_abandoned": "已放棄本次任務，其回應將被丟棄（已送出的請求無法中斷）",
         "btn_refresh_models": "更新模型",
         "btn_refresh_ollama": "重新偵測",
         "btn_oem_install_ollama": "安裝 OLLAMA",
@@ -490,6 +494,11 @@ UI_STRINGS = {
         # ── 選單列 ──
         "menu_file": "檔案",
         "menu_exit": "結束",
+        "menu_check_update": "檢查更新",
+        "btn_check_update": "檢查更新",
+        "update_available": "發現新版本 {new}（目前 {cur}）。\n\n是否開啟下載頁面？",
+        "update_latest": "目前已是最新版本（{cur}）。",
+        "update_failed": "目前無法連線到更新伺服器，請稍後再試。",
         "menu_view": "檢視",
         "menu_switch_lang": "切換介面語言",
         "menu_lang_zh": "中文",
@@ -805,6 +814,8 @@ UI_STRINGS = {
         "btn_auto_cap_off": "Auto Capture",
         "btn_auto_cap_tooltip": "Enable auto capture in the Capture Settings tab",
         "btn_clear_queue": "Clear Pending Tasks",
+        "btn_abandon_task": "Abandon Current Task",
+        "status_task_abandoned": "Task abandoned; its response will be discarded (a request already sent cannot be stopped)",
         "btn_refresh_models": "Refresh Models",
         "btn_refresh_ollama": "Re-detect",
         "btn_oem_install_ollama": "Install OLLAMA",
@@ -891,6 +902,11 @@ UI_STRINGS = {
         # ── Menu ──
         "menu_file": "File",
         "menu_exit": "Exit",
+        "menu_check_update": "Check for Updates",
+        "btn_check_update": "Check for Updates",
+        "update_available": "New version {new} is available (current {cur}).\n\nOpen the download page?",
+        "update_latest": "You are up to date ({cur}).",
+        "update_failed": "Unable to connect to the update server right now. Please try again later.",
         "menu_view": "View",
         "menu_switch_lang": "Switch UI Language",
         "menu_lang_zh": "中文",
@@ -1577,22 +1593,22 @@ def _build_simple_display_text(segments: list) -> str:
 
 
 def _detect_ocr_only(segments: list, src_lang: str) -> bool:
-    """偵測模型是否只做 OCR 未翻譯：tw 的假名字元佔比過高即判定。
-    專有名詞（角色名等）依 prompt 規定保留假名，故看佔比而非有無，
-    避免「パパス: It's still too dangerous...」這類正確翻譯被誤判。"""
+    """偵測模型是否只做 OCR 未翻譯。
+    判準看「平假名」而非全部假名，且把所有段落合併後整體計算：
+    - 專有名詞（角色名、地名、技能名）依 prompt 規定保留原文，其載體幾乎都是片假名
+      （リュウビ、エンジュツ），所以片假名不能當作「未翻譯」的證據。
+    - 未翻譯的日文對白必含大量平假名（助詞、語尾：の を は よ ならぬ…），
+      而譯文即使保留名字，平假名也只會出現在名字本身（みかど）。
+    - 逐段投票會讓 3 個字的名字框與整段對白等權，名字多的畫面就被誤判，故改為合併計算。
+    ponytail: 全片假名的未翻譯文字（部分 FC 遊戲）此判準抓不到；log 真的出現時再補規則。"""
     if "japanese" not in src_lang.lower() and "日文" not in src_lang:
         return False
-    kana = re.compile(r'[\u3041-\u309F\u30A1-\u30FF]')
-    if not segments:
+    text = "".join(s.get("tw", "") for s in segments if isinstance(s, dict))
+    hira = len(re.findall(r"[\u3041-\u309F]", text))
+    other = len(re.findall(r"[\u30A1-\u30FF\u4E00-\u9FFF\uFF66-\uFF9Fa-zA-Z]", text))
+    if hira < 6:          # 太短不足以判斷（單一名字框、「はい」等）
         return False
-    def _is_untranslated(text: str) -> bool:
-        text = text.strip()
-        if not text:
-            return False
-        return len(kana.findall(text)) > len(text) * 0.3
-    untranslated = sum(1 for s in segments if _is_untranslated(s.get("tw", "")))
-    return untranslated > len(segments) * 0.5
-
+    return hira > (hira + other) * 0.2
 
 def build_translate_prompt(src_lang: str, tgt_lang: str) -> str:
     if src_lang.startswith("All Foreign Text"):
@@ -1759,6 +1775,21 @@ def _parse_json_response(text):
 
     # 2) 數值被錯誤包成字串: "0.5" → 0.5（在 x/y/w/h 欄位）
     fixed = re.sub(r'"(\d+\.\d+)"(\s*[},\]])', r"\1\2", fixed)
+
+    # 2.5) 數值寫成除法算式: "y": 639.0 / 1000.0 → 0.639（JSON 不允許運算式）
+    _div_fixed = []
+
+    def _eval_div(m):
+        try:
+            v = float(m.group(2)) / float(m.group(3))
+        except (ValueError, ZeroDivisionError):
+            return m.group(0)
+        _div_fixed.append(f"{m.group(2)}/{m.group(3)}→{v:.3f}")
+        return f"{m.group(1)}{v:.6f}"
+
+    fixed = re.sub(r"(:\s*)(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)", _eval_div, fixed)
+    if _div_fixed:
+        log("JSON 自動修復：除法算式 " + ", ".join(_div_fixed))
 
     # 3) 尾巴多餘逗號: [... , ] → [... ]
     fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
@@ -3055,15 +3086,15 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.5.11")
+        self.root.title("LangForge  V1.5.12")
         _days_left = _oem_license_days_left()
         if _days_left is not None:
             if _days_left < 0:
-                self.root.title("LangForge  V1.5.11  －  " + S("status_oem_expired").format(
+                self.root.title("LangForge  V1.5.12  －  " + S("status_oem_expired").format(
                     date=OEM_LICENSE_EXPIRY.replace("-", "/")))
                 log(f"[OEM] 授權評估期已於 {OEM_LICENSE_EXPIRY} 屆期")
             elif _days_left <= OEM_LICENSE_WARN_DAYS:
-                self.root.title("LangForge  V1.5.11  －  " + S("oem_countdown").format(days=_days_left))
+                self.root.title("LangForge  V1.5.12  －  " + S("oem_countdown").format(days=_days_left))
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
             else:
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
@@ -3096,6 +3127,12 @@ class LangForgeApp:
         self._position_poll_job = None  # position polling after() job ID
         self._capture_in_progress = False  # 防止 capture thread 重入
         self._save_config_after_id = None  # trace_add debounce timer
+        # ── 放棄本次任務：世代編號。孤兒執行緒的世代 != self._gen 時，UI 收口函式直接 return ──
+        self._tls = threading.local()      # 執行緒本地：該執行緒所屬任務的世代
+        self._gen = 0
+        self._inflight_gen = None          # 目前在途任務的世代；None = 無在途任務
+        self._task_evt = None              # worker 等待的 event（完成或放棄時 set）
+        self._abandon_btns = []
 
         # OLLAMA 本地引擎偵測（非同步，不阻塞啟動）
         _splash("偵測本地 OLLAMA..." if CURRENT_LANG != "en" else "Detecting local OLLAMA...")
@@ -3129,6 +3166,8 @@ class LangForgeApp:
         menubar.add_command(label="🔀", command=self._toggle_ui_mode)
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label=S("menu_edit_platforms"), command=self._open_platform_editor)
+        if not IS_OEM:  # OEM 版不提供檢查更新，避免使用者被導向無 LOGO 的公開版
+            file_menu.add_command(label=S("menu_check_update"), command=self._check_update)
         file_menu.add_separator()
         file_menu.add_command(label=S("menu_exit"), command=self.root.destroy)
         menubar.add_cascade(label=S("menu_file"), menu=file_menu)
@@ -3357,6 +3396,9 @@ class LangForgeApp:
             btn_row7, text=S("btn_simple_translate"),
             command=lambda: threading.Thread(target=self._simple_translate, daemon=True).start())
         self._simple_trans_btn.pack(side="right")
+        _ab7 = ttk.Button(btn_row7, text=S("btn_abandon_task"), command=self._abandon_task, state="disabled")
+        _ab7.pack(side="right", padx=(0, 4))
+        self._abandon_btns.append(_ab7)
         ttk.Checkbutton(btn_row7, text=S("cb_simple_auto"), variable=self.simple_auto_var,
                         command=self._on_simple_auto_toggle).pack(side="left")
 
@@ -3716,8 +3758,11 @@ class LangForgeApp:
 
         # 第三排：清空佇列
         ttk.Button(func_row3, text=S("btn_clear_queue"), command=self._clear_queue).pack(
-            side="left", expand=True, fill="x"
+            side="left", expand=True, fill="x", padx=(0, 4)
         )
+        _ab1 = ttk.Button(func_row3, text=S("btn_abandon_task"), command=self._abandon_task, state="disabled")
+        _ab1.pack(side="left", expand=True, fill="x")
+        self._abandon_btns.append(_ab1)
 
         # ══════════════════════════════════════════
         # Tab 2 — 擷取設定
@@ -5555,7 +5600,55 @@ class LangForgeApp:
         patreon_link.pack(padx=20, anchor="w")
         patreon_link.bind("<Button-1>", lambda e: webbrowser.open(PATREON_URL))
 
-        ttk.Button(win, text=S("btn_ok"), command=win.destroy, width=10).pack(pady=(8, 0))
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=(8, 0))
+        if not IS_OEM:
+            ttk.Button(btn_row, text=S("btn_check_update"),
+                       command=lambda: self._check_update(win)).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_row, text=S("btn_ok"), command=win.destroy, width=10).pack(side="left")
+
+    def _check_update(self, parent=None):
+        """僅提醒：背景讀 UPDATE_URL，與 ABOUT_VERSION 逐段數字比較，結果由主執行緒顯示。"""
+        if getattr(self, "_update_checking", False):
+            return
+        self._update_checking = True
+        parent = parent or self.root
+
+        def _ver(v):
+            return tuple(int(x) for x in re.findall(r"\d+", str(v)))
+
+        def _work():
+            try:
+                req = urllib.request.Request(UPDATE_URL, headers={"User-Agent": "LangForge"})
+                with urllib.request.urlopen(req, timeout=8) as r:
+                    data = json.loads(r.read().decode("utf-8"))
+                new, cur = _ver(data["version"]), _ver(ABOUT_VERSION)
+                if not new:
+                    raise ValueError("invalid version")
+                res = ("new" if new > cur else "latest", str(data["version"]),
+                       str(data.get("url") or TUTORIAL_URL))
+            except Exception:  # 連不上、檔案不存在、內容非 JSON、格式錯誤 一律視為無法取得更新資訊
+                res = ("err",)
+            try:
+                self.root.after(0, lambda: _show(res))
+            except Exception:
+                self._update_checking = False
+
+        def _show(res):
+            self._update_checking = False
+            p = parent if parent.winfo_exists() else self.root
+            title = S("menu_check_update")
+            if res[0] == "err":
+                messagebox.showwarning(title, S("update_failed"), parent=p)
+            elif res[0] == "latest":
+                messagebox.showinfo(title, S("update_latest").format(cur=ABOUT_VERSION), parent=p)
+            else:
+                if messagebox.askyesno(title, S("update_available").format(
+                        new=res[1], cur=ABOUT_VERSION), parent=p):
+                    if res[2].lower().startswith(("http://", "https://")):
+                        webbrowser.open(res[2])
+
+        threading.Thread(target=_work, daemon=True).start()
 
     # ══════════════════════════════════════════
     # Tab 1 — 遊戲平台聯動
@@ -6192,25 +6285,88 @@ class LangForgeApp:
                 _request_queue.task_done()
                 break
             try:
-                t = task["type"]
-                img   = task["image_pil"]
-                src   = task.get("source", "file")
-                title = task.get("win_title", "")
-                # 把 snap_* 快照單獨傳入，避免與位置參數衝突
-                snaps = {k: v for k, v in task.items() if k.startswith("snap_")}
-                if t == "translate":
-                    self._do_translate(img, src, title, **snaps)
-                elif t == "guide":
-                    self._do_guide(img, title, **snaps)
-                elif t == "combined":
-                    self._do_combined_translate(img, title, **snaps)
+                # 任務丟進子執行緒，worker 等 event：由「完成」或「使用者放棄」任一方 set。
+                # 放棄時 worker 直接取下一筆，被放棄的子執行緒成為孤兒、跑完自行結束。
+                gen = self._gen
+                evt = threading.Event()
+                self._task_evt = evt
+                self._inflight_gen = gen
+                self.root.after(0, self._refresh_abandon_btn)
+                threading.Thread(target=self._run_task, args=(task, gen, evt), daemon=True).start()
+                evt.wait()
             except Exception as e:
-                log(f"[Worker] 執行失敗: {e}")
+                log(f"[Worker] 啟動任務失敗: {e}")
                 self._set_status(S("status_api_unknown"), "red")
                 self._stamp_elapsed()
             finally:
                 _request_queue.task_done()
                 self.root.after(0, lambda: self._update_queue_label(_request_queue.qsize()))
+
+    def _run_task(self, task, gen, evt):
+        """子執行緒：執行單一任務。self._tls.gen 讓收口函式辨識自己是否已成孤兒。"""
+        self._tls.gen = gen
+        try:
+            t = task["type"]
+            img   = task["image_pil"]
+            src   = task.get("source", "file")
+            title = task.get("win_title", "")
+            # 把 snap_* 快照單獨傳入，避免與位置參數衝突
+            snaps = {k: v for k, v in task.items() if k.startswith("snap_")}
+            if t == "translate":
+                self._do_translate(img, src, title, **snaps)
+            elif t == "guide":
+                self._do_guide(img, title, **snaps)
+            elif t == "combined":
+                self._do_combined_translate(img, title, **snaps)
+        except Exception as e:
+            log(f"[Worker] 執行失敗: {e}")
+            self._set_status(S("status_api_unknown"), "red")
+            self._stamp_elapsed()
+        finally:
+            if self._inflight_gen == gen:   # 已被放棄的孤兒不動目前狀態
+                self._inflight_gen = None
+            evt.set()                       # 只 set 自己這一筆的 event
+            self.root.after(0, self._refresh_abandon_btn)
+
+    # ── 放棄本次任務 ──
+    # ponytail: 邏輯放棄，非中斷。雲端 SDK 阻塞呼叫無法從外部取消，連線與配額照常消耗；
+    #           升級路徑：改用支援 cancel 的 async client。
+    def _is_stale(self):
+        g = getattr(self._tls, "gen", None)
+        return g is not None and g != self._gen
+
+    def _after(self, ms, fn):
+        """孤兒執行緒專用的 root.after：呼叫時與執行時都比對世代，過期就丟棄。"""
+        g = getattr(self._tls, "gen", None)
+        if g is not None and g != self._gen:
+            return None
+        def _run():
+            if g is not None and g != self._gen:
+                return
+            fn()
+        return self.root.after(ms, _run)
+
+    def _refresh_abandon_btn(self):
+        st = "normal" if self._inflight_gen is not None else "disabled"
+        for b in self._abandon_btns:
+            try:
+                b.config(state=st)
+            except Exception:
+                pass
+
+    def _abandon_task(self):
+        if self._inflight_gen is None:
+            return                              # 無在途任務（含已放棄過）：不進堆疊
+        self._gen += 1                          # 先換世代，在途任務立即成為孤兒
+        self._inflight_gen = None
+        evt = self._task_evt
+        if evt:
+            evt.set()                           # 喚醒 worker 取下一筆
+        self._simple_translating = False        # 簡易模式自動迴圈可立刻接下一次
+        self._refresh_abandon_btn()
+        self._stamp_elapsed()                   # 主執行緒無 tls，不受世代阻擋
+        self._set_status(S("status_task_abandoned"), "orange")
+        log("[abandon] 使用者放棄本次任務")
 
     def _trigger_auto_translate(self, image_pil):
         mode = self.engine_mode_var.get()
@@ -6401,6 +6557,8 @@ class LangForgeApp:
             self.root.after(0, lambda: save_config(self.config))
 
     def _set_status(self, text, color="blue"):
+        if self._is_stale():
+            return
         # 簡化：移除訊息中的模型名稱前綴（格式：「引擎 (模型) 訊息」→「訊息」）
 
         simplified = re.sub(r"^[A-Za-z]+\s*\([^)]+\)\s*", "", text).strip()
@@ -6476,6 +6634,8 @@ class LangForgeApp:
         return f"{s//60}m{s%60:02d}s" if s >= 60 else f"{s}s"
 
     def _stamp_elapsed(self, api_secs: float | None = None):
+        if self._is_stale():
+            return
         if not getattr(self, "_trans_start_time", None):
             return
         if getattr(self, "_elapsed_timer_id", None):
@@ -6933,7 +7093,7 @@ class LangForgeApp:
             if mode == "free":
                 return
 
-            if mode == "main":
+            if mode == "corner":
                 # 取得主視窗目前所在螢幕的邊界
                 mx = self.root.winfo_x()
                 my = self.root.winfo_y()
@@ -6972,6 +7132,13 @@ class LangForgeApp:
                     my = self.root.winfo_y()
                     mw = self.root.winfo_width()
                     dx, dy = mx + mw + 10, my
+
+            elif mode == "main":
+                # 依附主視窗：翻譯視窗貼在主視窗右側
+                mx = self.root.winfo_x()
+                my = self.root.winfo_y()
+                mw = self.root.winfo_width()
+                dx, dy = mx + mw + 10, my
 
             else:  # 'mesen'
                 mesen_rect = self._find_mesen_window()
@@ -7324,6 +7491,8 @@ class LangForgeApp:
             self._simple_win.geometry(self._simple_win_default_geom)
 
     def _show_simple_result(self, text: str):
+        if self._is_stale():
+            return
         self.root.after(0, self._ensure_simple_win)
         def _upd(t=text):
             if not getattr(self, "_simple_lbl", None):
@@ -7423,6 +7592,9 @@ class LangForgeApp:
 
     def _simple_translate(self, image_pil=None):
         log("[簡易模式] 單次翻譯觸發")
+        self._tls.gen = my_gen = self._gen
+        self._inflight_gen = my_gen
+        self.root.after(0, self._refresh_abandon_btn)
         self._simple_translating = True
         try:
             if image_pil is None:
@@ -7475,7 +7647,10 @@ class LangForgeApp:
                 self._set_status(S("status_no_text_found"), "gray")
                 self._stamp_elapsed()
         finally:
-            self._simple_translating = False
+            if self._inflight_gen == my_gen:    # 已被放棄的孤兒不動目前狀態
+                self._inflight_gen = None
+                self._simple_translating = False
+            self.root.after(0, self._refresh_abandon_btn)
 
     def _on_simple_auto_toggle(self):
         on = self.simple_auto_var.get()
@@ -8045,13 +8220,13 @@ class LangForgeApp:
             # 更新配額
             self.config["used_today"][model] = self.config["used_today"].get(model, 0) + 1
             self._safe_save_config()
-            self.root.after(0, self._refresh_quota)
+            self._after(0, self._refresh_quota)
 
             # 儲存到 DB
             self._save_guide_log(rom_name, model, progress, guide_list, image_pil=image_pil)
 
             # 顯示結果到翻譯視窗
-            self.root.after(0, lambda: self._render_guide(progress, guide_list, image_pil))
+            self._after(0, lambda: self._render_guide(progress, guide_list, image_pil))
             self._set_status(S("status_guide_done"), "green")
             log(f"{model} 攻略分析成功")
 
@@ -8066,9 +8241,9 @@ class LangForgeApp:
                     log(f"攻略救援解析成功: progress={bool(progress)}, guide={len(guide_list)} 項")
                     self.config["used_today"][model] = self.config["used_today"].get(model, 0) + 1
                     self._safe_save_config()
-                    self.root.after(0, self._refresh_quota)
+                    self._after(0, self._refresh_quota)
                     self._save_guide_log(rom_name, model, progress, guide_list, image_pil=image_pil)
-                    self.root.after(0, lambda _p=progress, _g=guide_list: self._render_guide(_p, _g, image_pil))
+                    self._after(0, lambda _p=progress, _g=guide_list: self._render_guide(_p, _g, image_pil))
                     self._set_status(S("status_guide_done"), "green")
                     return
             self._set_status(S("status_guide_json_fail"), "red")
@@ -8167,6 +8342,8 @@ class LangForgeApp:
         self.guide_canvas.config(image=self.guide_tk_img)
 
     def _save_guide_log(self, rom_name, model, progress, guide_list, image_pil=None):
+        if self._is_stale():
+            return
 
         try:
             ss_rel = None
@@ -8196,7 +8373,7 @@ class LangForgeApp:
             log(f"攻略紀錄已儲存: {rom_name} (第 {count} 筆)")
             self._guide_nav_rom_name = rom_name
             self._guide_nav_index = 0
-            self.root.after(0, self._guide_nav_reload)
+            self._after(0, self._guide_nav_reload)
         except Exception as e:
             log(f"儲存攻略紀錄失敗: {e}")
 
@@ -8253,7 +8430,7 @@ class LangForgeApp:
             self.config["used_today"][model] = self.config["used_today"].get(model, 0) + 1
             self.config[eng] = api_key
             self._safe_save_config()
-            self.root.after(0, self._refresh_quota)
+            self._after(0, self._refresh_quota)
 
             # 儲存翻譯紀錄
             if translations:
@@ -8269,10 +8446,10 @@ class LangForgeApp:
                 self._save_guide_log(rom_name, model, progress, guide_list, image_pil=image_pil)
 
             # 渲染翻譯結果
-            self.root.after(0, lambda _t=translations, _img=image_pil: self.render(_t, _img, "capture"))
+            self._after(0, lambda _t=translations, _img=image_pil: self.render(_t, _img, "capture"))
 
             # 渲染攻略結果
-            self.root.after(0, lambda _p=progress, _g=guide_list, _img=image_pil: self._render_guide(_p, _g, _img))
+            self._after(0, lambda _p=progress, _g=guide_list, _img=image_pil: self._render_guide(_p, _g, _img))
 
             self._set_status(S("status_combo_done"), "green")
             self._stamp_elapsed()
@@ -8411,7 +8588,7 @@ class LangForgeApp:
                 platform=platform,
             )
 
-        self.root.after(0, lambda _s=_merge_ocr_lines(segments), _img=image_pil: self.render(_s, _img, source))
+        self._after(0, lambda _s=_merge_ocr_lines(segments), _img=image_pil: self.render(_s, _img, source))
 
     def _do_translate(self, image_pil, source="file", win_title="", **task):
         log(f"[進階模式] 翻譯觸發 source={source}")
@@ -8420,7 +8597,7 @@ class LangForgeApp:
             self._start_elapsed_timer()
         else:
             evt = threading.Event()
-            self.root.after(0, lambda: (self._start_elapsed_timer(), evt.set()))
+            self._after(0, lambda: (self._start_elapsed_timer(), evt.set()))
             evt.wait(timeout=2)
 
         # 優先使用 enqueue 時的快照值，確保 worker thread 不直接讀取 UI 變數
@@ -8521,7 +8698,7 @@ class LangForgeApp:
                     res, ollama_model, win_title, image_pil,
                     target_window=target_win, platform=platform,
                 )
-            self.root.after(0, lambda _r=res, _img=image_pil, _s=source: self.render(_r, _img, _s))
+            self._after(0, lambda _r=res, _img=image_pil, _s=source: self.render(_r, _img, _s))
             return
 
         # ── 雲端引擎流程 ──
@@ -8570,8 +8747,8 @@ class LangForgeApp:
                         learned.append(model)
                         save_config(self.config)
                     log(f"[quota] 學習到 {model} limit=0，已記錄，嘗試自動切換...")
-                    self.root.after(0, self._refresh_quota)
-                    self.root.after(0, self._refresh_quota_table)
+                    self._after(0, self._refresh_quota)
+                    self._after(0, self._refresh_quota_table)
                     if self._auto_switch_model():
                         log(f"[quota] limit=0 觸發自動切換成功，重新送出翻譯請求...")
                         # 用新引擎/模型的快照重新加入佇列
@@ -8654,7 +8831,7 @@ class LangForgeApp:
                 else:
                     self.config.setdefault("custom_quota", {})[model] = cur_limit
             self._safe_save_config()
-            self.root.after(0, self._refresh_quota)
+            self._after(0, self._refresh_quota)
             if _detect_ocr_only(res, task.get("snap_src_lang", "")):
                 self._set_status(S("status_model_ocr_only"), "orange")
             else:
@@ -8674,7 +8851,7 @@ class LangForgeApp:
             if not _api_call_failed:
                 self._set_status(S("status_no_text_found"), "gray")
 
-        self.root.after(0, lambda _r=res, _img=image_pil, _s=source: self.render(_r, _img, _s))
+        self._after(0, lambda _r=res, _img=image_pil, _s=source: self.render(_r, _img, _s))
 
     # ══════════════════════════════════════════
     # ══════════════════════════════════════════
@@ -8787,6 +8964,8 @@ class LangForgeApp:
             log(f"[DB] 補算場次大小失敗: {e}")
 
     def _save_translation_log(self, segments, model, win_title, image_pil, target_window="", platform=""):
+        if self._is_stale():
+            return
 
         try:
             # 從視窗標題擷取 ROM 名稱
@@ -9035,15 +9214,16 @@ class LangForgeApp:
                 tw_preview = s.get("tw", "")[:12].replace("\n", " ")
                 if _group_px_x or _group_px_y:
                     _px_fix_count += 1
-                    sx_c = (sx_raw / orig_w) if _group_px_x else sx_raw
-                    sy_c = (sy_raw / orig_h) if _group_px_y else sy_raw
+                    sx_c = (sx_raw / orig_w) if (_group_px_x and sx_raw > 1.0) else sx_raw
+                    sy_c = (sy_raw / orig_h) if (_group_px_y and sy_raw > 1.0) else sy_raw
                     if sx_c > 1.0: sx_c = sx_raw / max(_all_sx)
                     if sy_c > 1.0: sy_c = sy_raw / max(_all_sy)
                     sx_c = max(0.02, min(0.98, sx_c))
                     sy_c = max(0.02, min(0.98, sy_c))
                     tag_x = "⚠超出" if sx_raw > orig_w else ""
                     tag_y = "⚠超出" if sy_raw > orig_h else ""
-                    log(f"[COORD] seg[{i}] 像素 x={sx_raw:.0f}{tag_x} y={sy_raw:.0f}{tag_y} → 修正後比例({sx_c:.3f},{sy_c:.3f}) → 畫面({int(sx_c*out_w)},{int(sy_c*out_h)}) | {tw_preview!r}")
+                    _unit = "像素" if (sx_raw > 1.0 or sy_raw > 1.0) else "比例"
+                    log(f"[COORD] seg[{i}] {_unit} x={sx_raw:.3f}{tag_x} y={sy_raw:.3f}{tag_y} → 修正後比例({sx_c:.3f},{sy_c:.3f}) → 畫面({int(sx_c*out_w)},{int(sy_c*out_h)}) | {tw_preview!r}")
                 else:
                     log(f"[COORD] seg[{i}] 比例 x={sx_raw:.3f} y={sy_raw:.3f} → 畫面({int(sx_raw*out_w)},{int(sy_raw*out_h)}) | {tw_preview!r}")
             if _px_fix_count:
@@ -9081,13 +9261,13 @@ class LangForgeApp:
 
             for tw, sx, sy in raw_coords:
                 # X 軸：像素 → 除以原圖寬，超出範圍夾邊
-                if group_is_px_x:
+                if group_is_px_x and sx > 1.0:   # 逐值判斷：同組可能混用像素與比例
                     sx = sx / orig_w
                 sx = max(0.02, min(0.98, sx))
 
                 # Y 軸：像素 → 若最大值超出原圖高，代表模型用了更大座標系（如螢幕高度）
                 # 用 max_sy 做歸一化以保留組內相對位置；否則用 orig_h
-                if group_is_px_y:
+                if group_is_px_y and sy > 1.0:   # 逐值判斷：>1.0 必為像素，≤1.0 視為比例
                     if max_sy > orig_h:
                         sy = sy / max_sy
                     else:
@@ -9150,7 +9330,7 @@ class LangForgeApp:
                 if text_w < 30:
                     draw_x = PADDING
                     text_w = usable_w
-                avg_cw = font_size * 0.55
+                avg_cw = max(1.0, _text_px(font, tw, font_size * 0.55) / max(1, len(tw)))
                 cpl = max(1, int(text_w / avg_cw))
                 nlines = max(1, -(-len(tw) // cpl))
                 block_h = nlines * line_h + 2
@@ -9160,14 +9340,22 @@ class LangForgeApp:
                 raw_y = int(sy * out_h)
                 target_y = _resolve_overlap_y(draw_x, draw_x + text_px, raw_y, block_h, sim_placed)
 
-                if target_y + block_h > out_h:
-                    sim_ok = False
+                if block_h > y_limit - PADDING:
+                    sim_ok = False   # 內容本身撐破整個畫面高度 → 才需要降字級
                     break
+                if target_y + block_h > y_limit:
+                    target_y = max(PADDING, y_limit - block_h)   # 位置太低 → 夾住，與實際繪製一致
+                    # 夾回來若撞到已放置的段落，表示此字級排不下 → 降一級重排，避免疊字
+                    if any(draw_x < b[2] and draw_x + text_px > b[0]
+                           and target_y < b[3] and target_y + block_h > b[1] for b in sim_placed):
+                        sim_ok = False
+                        break
                 sim_placed.append((draw_x, target_y, draw_x + text_px, target_y + block_h))
 
             if sim_ok:
                 break
             font_size -= 1
+        font_size = max(font_size, min_font_size)   # 迴圈耗盡時 font_size 會少 1，與已取得的 font 對齊
 
         # ── 底圖：原圖 + 30% 不透明度 ──
         bg_rgba = image_pil.convert("RGBA")
@@ -9187,7 +9375,7 @@ class LangForgeApp:
             if text_w < 30:
                 draw_x = PADDING
                 text_w = out_w - draw_x - PADDING
-            avg_cw = font_size * 0.55
+            avg_cw = max(1.0, _text_px(font, tw, font_size * 0.55) / max(1, len(tw)))
             cpl = max(1, int(text_w / avg_cw)) if avg_cw > 0 else 1
             nlines = max(1, -(-len(tw) // cpl))
             block_h = nlines * (font_size + 4) + 2
