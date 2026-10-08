@@ -6,7 +6,8 @@ GitHub : https://github.com/toyakyo
 License: Copyright © 2026 GoOnSoft. All rights reserved.
 
 需要安裝的第三方套件（一鍵安裝）:
-  pip install anthropic easyocr google-genai groq keyboard mistralai numpy openai pillow pywin32
+  pip install anthropic google-genai groq mistralai openai pillow
+  Windows 另需: pip install keyboard pywin32
 """
 
 import threading
@@ -22,9 +23,16 @@ import copy
 import webbrowser
 import urllib.request
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
-from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageGrab, ImageChops
-import win32gui
+from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageGrab, ImageChops, ImageStat
+
+IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
+if IS_WIN:
+    import win32gui
+else:
+    win32gui = None  # Linux / macOS：無視窗列舉 API，改用「整個螢幕」擷取
+
+SCREEN_HWND = -1  # 非 Windows 的虛擬視窗代號：代表整個主螢幕
 
 # ==========================================
 # 三層環境自動偵測
@@ -36,7 +44,7 @@ IS_FROZEN = getattr(sys, 'frozen', False)  # PyInstaller 標記
 # 在部分機器上啟動失敗（Failed to import encodings module）。改用 console=True
 # 再於此處隱藏視窗，是已驗證可行的替代方案。視窗會短暫閃現後消失。
 # 未取得 Code Signing 憑證前維持此作法；簽章後可改回 console=False 並移除本段。
-if IS_FROZEN:
+if IS_FROZEN and IS_WIN:
     try:
         _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
         if _hwnd:
@@ -134,12 +142,15 @@ os.makedirs(CONFIG_DIR, exist_ok=True)
 os.makedirs(ASSET_DATA_DIR, exist_ok=True)
 os.makedirs(TRANSLATION_LOGS_DIR, exist_ok=True)
 
-try:
-    import keyboard  # pip install keyboard
+# 全域快捷鍵：Windows 限定（Linux 需 root、macOS 需輔助使用權限，第一階段不支援）
+HAS_KEYBOARD = False
+if IS_WIN:
+    try:
+        import keyboard  # pip install keyboard
 
-    HAS_KEYBOARD = True
-except ImportError:
-    HAS_KEYBOARD = False
+        HAS_KEYBOARD = True
+    except ImportError:
+        HAS_KEYBOARD = False
 
 
 # ==========================================
@@ -281,7 +292,6 @@ UI_STRINGS = {
         "lf_cloud_engine": "翻譯引擎",
         "rb_engine_cloud": "☁ 雲端引擎",
         "rb_engine_local": "🦙 本地引擎 (OLLAMA)",
-        "rb_engine_ocr": "🔍 本地OCR+Google翻譯",
         "msg_lang_changed_zh": "介面語言已設為中文，重新啟動後生效。",
         "msg_delete_cat": "刪除主類別「{cat}」及其所有平台？",
         "status_save_fail": "儲存失敗: {err}",
@@ -327,15 +337,7 @@ UI_STRINGS = {
         "status_error": "錯誤: {msg}",
         "status_parse_error": "解析錯誤: {msg}",
         "status_done": "翻譯完成",
-        "status_ocr_running": "OCR 辨識中...",
-        "status_ocr_no_easyocr": "缺少 easyocr，請執行 pip install easyocr",
-        "status_ocr_no_text": "OCR 未偵測到可信文字",
-        "status_ocr_src_auto": "OCR 不支援「所有外文」，請在擷取設定指定遊戲語言",
         "status_no_text_found": "未偵測到可翻譯文字",
-        "status_ocr_fail": "OCR 失敗: {msg}",
-        "status_gt_fail": "Google 翻譯失敗: {msg}",
-        "status_ocr_no_result": "OCR 無有效結果",
-        "status_ocr_done": "OCR 翻譯完成（{n} 段）",
         "status_bad_request": "請求格式錯誤，該模型可能不支援圖片",
         "status_not_found": "找不到此模型或端點，請確認模型名稱是否正確",
         "status_not_found_nvcf": "此模型使用舊版端點格式，程式不相容，請從清單中移除",
@@ -352,7 +354,6 @@ UI_STRINGS = {
         "status_cooling": "{model} 冷卻中，請等 {wait} 秒",
         "status_analyzing": "{engine} ({model}) 分析中...",
         "status_combo_analyzing": "{engine} ({model}) 翻譯+攻略分析中...",
-        "status_ocr_translating": "OCR → Google 翻譯中...",
         "status_ollama_running": "OLLAMA 推理中... (timeout={t}s)",
         "status_ollama_done": "OLLAMA 翻譯完成（{n} 段）",
         "status_ollama_empty": "OLLAMA 推理完成，但未辨識到可翻譯文字",
@@ -504,8 +505,6 @@ UI_STRINGS = {
         "quota_unknown": "(配額未知)",
         "oem_ollama_frame": "OLLAMA 設定",
         "monitor_watching": "監視中",
-        "ocr_lang_auto_warn": "⚠ 遊戲語言: {src}（OCR 不支援，請改為指定語言）",
-        "ocr_lang_pair": "遊戲語言: {src}　→　譯文: {tgt}",
         "status_choose_local_model": "請選擇本地模型",
         "guide_progress_header": "▎目前進度",
         "menu_view": "檢視",
@@ -584,7 +583,6 @@ UI_STRINGS = {
         "lbl_hotkeys": "快捷鍵",
         "lbl_hotkey_prompt": "請按下組合鍵...",
         "lbl_hotkey_invalid": "無效組合，請重試",
-        "lbl_ocr_desc": "本地 EasyOCR 辨識文字座標，Google 翻譯",
         "session_elapsed": "錄製中  {t}",
         "session_elapsed_h": "{h}時{m:02d}分{s:02d}秒",
         "session_elapsed_m": "{m}分{s:02d}秒",
@@ -653,7 +651,6 @@ UI_STRINGS = {
         "lf_cloud_engine": "Engine",
         "rb_engine_cloud": "☁ Cloud Engine",
         "rb_engine_local": "🦙 Local (OLLAMA)",
-        "rb_engine_ocr": "🔍 Local OCR+Google Translate",
         "msg_lang_changed_zh": "UI language set to Chinese. Restart to apply.",
         "msg_delete_cat": 'Delete category "{cat}" and all its platforms?',
         "status_save_fail": "Save failed: {err}",
@@ -699,15 +696,7 @@ UI_STRINGS = {
         "status_error": "Error: {msg}",
         "status_parse_error": "Parse error: {msg}",
         "status_done": "Translation done",
-        "status_ocr_running": "OCR analyzing...",
-        "status_ocr_no_easyocr": "Missing easyocr, run pip install easyocr",
-        "status_ocr_no_text": "No confident text detected by OCR",
-        "status_ocr_src_auto": "OCR doesn't support 'All Foreign Text', please select a specific language",
         "status_no_text_found": "No translatable text detected",
-        "status_ocr_fail": "OCR failed: {msg}",
-        "status_gt_fail": "Google Translate failed: {msg}",
-        "status_ocr_no_result": "OCR no valid results",
-        "status_ocr_done": "OCR done ({n} segments)",
         "status_bad_request": "Bad request format, model may not support images",
         "status_not_found": "Model or endpoint not found. Check the model name.",
         "status_not_found_nvcf": "This model uses a legacy endpoint format not supported by this app. Remove it from the list.",
@@ -724,7 +713,6 @@ UI_STRINGS = {
         "status_cooling": "{model} cooldown, wait {wait}s",
         "status_analyzing": "{engine} ({model}) analyzing...",
         "status_combo_analyzing": "{engine} ({model}) translate+guide...",
-        "status_ocr_translating": "OCR → Google Translate...",
         "status_ollama_running": "OLLAMA running... (timeout={t}s)",
         "status_ollama_done": "OLLAMA done ({n} segments)",
         "status_ollama_empty": "OLLAMA finished — no translatable text found",
@@ -921,8 +909,6 @@ UI_STRINGS = {
         "quota_unknown": "(quota unknown)",
         "oem_ollama_frame": "OLLAMA Setup",
         "monitor_watching": "Monitoring",
-        "ocr_lang_auto_warn": "⚠ Game language: {src} (not supported by OCR; please choose a specific language)",
-        "ocr_lang_pair": "Game language: {src}  →  Translation: {tgt}",
         "status_choose_local_model": "Please select a local model",
         "guide_progress_header": "▎Current Progress",
         "menu_view": "View",
@@ -993,7 +979,6 @@ UI_STRINGS = {
         "lbl_hotkeys": "Hotkeys",
         "lbl_hotkey_prompt": "Press combo...",
         "lbl_hotkey_invalid": "Invalid, retry",
-        "lbl_ocr_desc": "Local EasyOCR detects text coords, Google Translate",
         "session_elapsed": "Recording  {t}",
         "session_elapsed_h": "{h}h {m:02d}m {s:02d}s",
         "session_elapsed_m": "{m}m {s:02d}s",
@@ -1067,14 +1052,21 @@ def _get_monitors():
             result.append({"index": i + 1, "label": label, **m})
         return result if result else [{"index": 1, "label": "Screen 1" if CURRENT_LANG == "en" else "螢幕 1", "x": 0, "y": 0, "w": 1920, "h": 1080}]
     except Exception:
+        _sw, _sh = 1920, 1080
+        try:
+            if tk._default_root is not None:  # 非 Windows：用 Tk 取主螢幕尺寸
+                _sw = tk._default_root.winfo_screenwidth()
+                _sh = tk._default_root.winfo_screenheight()
+        except Exception:
+            pass
         return [
             {
                 "index": 1,
-                "label": "Screen 1  (1920x1080)" if CURRENT_LANG == "en" else "螢幕 1  (1920x1080)",
+                "label": f"Screen 1  ({_sw}x{_sh})" if CURRENT_LANG == "en" else f"螢幕 1  ({_sw}x{_sh})",
                 "x": 0,
                 "y": 0,
-                "w": 1920,
-                "h": 1080,
+                "w": _sw,
+                "h": _sh,
             }
         ]
 
@@ -1167,6 +1159,23 @@ COOLDOWN_SECONDS_DEFAULT = 13
 # ==========================================
 def _get_machine_salt() -> bytes:
     salt_src = ""
+    if not IS_WIN:
+        for _p in ("/etc/machine-id", "/var/lib/dbus/machine-id"):  # Linux
+            try:
+                with open(_p, "r", encoding="utf-8") as _f:
+                    salt_src = _f.read().strip()
+                if salt_src:
+                    break
+            except Exception:
+                pass
+        if not salt_src and IS_MAC:
+            try:
+                _out = subprocess.run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                                      capture_output=True, text=True, timeout=5).stdout
+                _m = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', _out)
+                salt_src = _m.group(1) if _m else ""
+            except Exception:
+                pass
     try:
         import winreg
 
@@ -1236,6 +1245,23 @@ LANG_FONT_CANDIDATES = {
     "default": ["msjh.ttc", "msyh.ttc", "arial.ttf"],
 }
 
+# Linux / macOS 的 CJK 與一般字體（依序嘗試；各自涵蓋中日韓與拉丁字母）
+_NON_WIN_FONT_FILES = [
+    # macOS
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+    "/Library/Fonts/Arial Unicode.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    # Ubuntu / Debian（fonts-noto-cjk、fonts-wqy-microhei 等）
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+]
+
 
 def _get_font_for_lang(tgt_lang: str, size: int):
     import os
@@ -1251,13 +1277,20 @@ def _get_font_for_lang(tgt_lang: str, size: int):
     if candidates is None:
         candidates = LANG_FONT_CANDIDATES["default"]
 
-    win_fonts = "C:/Windows/Fonts"
-    for fname in candidates:
-        fpath = os.path.join(win_fonts, fname)
-        try:
-            return ImageFont.truetype(fpath, size)
-        except Exception:
-            pass
+    if IS_WIN:
+        win_fonts = "C:/Windows/Fonts"
+        for fname in candidates:
+            fpath = os.path.join(win_fonts, fname)
+            try:
+                return ImageFont.truetype(fpath, size)
+            except Exception:
+                pass
+    else:
+        for fpath in _NON_WIN_FONT_FILES:
+            try:
+                return ImageFont.truetype(fpath, size)
+            except Exception:
+                pass
     # 最終 fallback
     return ImageFont.load_default()
 
@@ -2147,40 +2180,12 @@ ENGINE_CALLERS = {
 # ==========================================
 OLLAMA_BASE_URL = "http://localhost:11434"
 
-GOOGLE_TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single"
 OVERLAY_FONT_SIZE_MIN     = 10
 OVERLAY_FONT_SIZE_MAX     = 36
 OVERLAY_FONT_SIZE_DEFAULT = 22
 OVERLAY_FONT_SIZE_MAX_DEFAULT = 22   # 自動縮放最大字級
 OVERLAY_FONT_SIZE_MIN_CLAMP   = 10   # 自動縮放最小下限
 QUOTA_ESTIMATED_DEFAULT = 50         # 未知配額模型首次翻譯成功後套用的保守預設值
-
-OCR_CONF_THRESHOLD = 0.1      # EasyOCR 最低信心值
-OCR_MAX_WIDTH = 1280          # 送入 EasyOCR 前限制最大寬度（px）
-OCR_TRANSLATE_WORKERS = 8     # Google 翻譯並行執行緒數
-
-
-def _google_translate(text: str, src_lang: str, tgt_lang: str) -> str:
-
-    try:
-        params = urllib.parse.urlencode(
-            {
-                "client": "gtx",
-                "sl": src_lang,
-                "tl": tgt_lang,
-                "dt": "t",
-                "q": text,
-            }
-        )
-        url = f"{GOOGLE_TRANSLATE_URL}?{params}"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        translated = "".join(part[0] for part in data[0] if part[0])
-        return translated.strip() if translated else text
-    except Exception:
-        return text
-
 
 LANG_TO_BCP47 = {
     "All Foreign Text On The Screen(畫面上所有外文)": "auto",
@@ -2197,59 +2202,11 @@ LANG_TO_BCP47 = {
     "Russian(俄文)": "ru",
 }
 
-# EasyOCR 不支援 "auto"；"auto" 模式改為常用多語言組合
-_EASYOCR_AUTO_LANGS = ["ja", "en", "ch_sim", "ch_tra", "ko"]
-
-def _resize_for_ocr(image_pil):
-    w, h = image_pil.width, image_pil.height
-    if w <= OCR_MAX_WIDTH:
-        return image_pil, 1.0
-    scale = OCR_MAX_WIDTH / w
-    new_h = int(h * scale)
-    resized = image_pil.resize((OCR_MAX_WIDTH, new_h), Image.LANCZOS)
-    return resized, scale
-
-
-def _bcp47_to_easyocr(bcp47: str) -> list:
-    if bcp47 == "auto":
-        return _EASYOCR_AUTO_LANGS
-    code = bcp47.split("-")[0]
-    # EasyOCR 用 ch_sim / ch_tra 而非 zh
-    if code == "zh":
-        region = bcp47.split("-")[1] if "-" in bcp47 else ""
-        return ["ch_tra", "en"] if region.upper() in ("TW", "HK") else ["ch_sim", "en"]
-    return [code]
-
-
 def _lang_label(s: str) -> str:
     """提取語言字串括號內的名稱，如 'Japanese(日文)' → '日文'"""
     m = re.search(r'\(([^)]+)\)', s)
     return m.group(1) if m else s
 
-
-def _merge_ocr_lines(segments: list, y_thresh: float = 0.03) -> list:
-    """同行 OCR 片段（y 差 ≤ y_thresh）按 x 排序合併，從 x=0.02 開始顯示（整齊靠左）"""
-    if not segments:
-        return segments
-    by_y = sorted(segments, key=lambda s: float(s.get("y", 0)))
-    groups, cur = [], [by_y[0]]
-    for seg in by_y[1:]:
-        if abs(float(seg.get("y", 0)) - float(cur[-1].get("y", 0))) <= y_thresh:
-            cur.append(seg)
-        else:
-            groups.append(cur)
-            cur = [seg]
-    groups.append(cur)
-    merged = []
-    for grp in groups:
-        grp_x = sorted(grp, key=lambda s: float(s.get("x", 0)))
-        tw = " ".join(s.get("tw", "").strip() for s in grp_x if s.get("tw", "").strip())
-        if not tw:
-            continue
-        avg_y = sum(float(s.get("y", 0)) for s in grp) / len(grp)
-        merged.append({"tw": tw, "x": 0.02, "y": avg_y,
-                       "w": grp_x[0].get("w", 0.5), "h": grp_x[0].get("h", 0.05)})
-    return merged
 
 OLLAMA_TIMEOUT = 180  # 預設推理 timeout（秒）；大型視覺模型（如 QWEN2.5VL）需要較長時間
 
@@ -2326,7 +2283,12 @@ def _detect_infer_backend():
         return _INFER_BACKEND_CACHE
     dev = lib = None
     try:
-        path = os.path.join(os.environ["LOCALAPPDATA"], "Ollama", "server.log")
+        if IS_WIN:
+            path = os.path.join(os.environ["LOCALAPPDATA"], "Ollama", "server.log")
+        elif IS_MAC:
+            path = os.path.expanduser("~/.ollama/logs/server.log")
+        else:
+            raise FileNotFoundError("Linux 的 OLLAMA 以 systemd/journal 記錄，略過 server.log 偵測")
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 if "inference compute" not in line:
@@ -2360,15 +2322,20 @@ def _detect_ollama_num_predict() -> int:
     if _OLLAMA_NUM_PREDICT is not None:
         return _OLLAMA_NUM_PREDICT
     try:
-        r = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "(Get-CimInstance Win32_VideoController | "
-             "Where-Object {$_.Name -like '*NVIDIA*'} | "
-             "Select-Object -First 1).Name"],
-            capture_output=True, text=True, timeout=6,
-            creationflags=_NO_WINDOW
-        )
-        gpu_name = r.stdout.strip()
+        if IS_WIN:
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "(Get-CimInstance Win32_VideoController | "
+                 "Where-Object {$_.Name -like '*NVIDIA*'} | "
+                 "Select-Object -First 1).Name"],
+                capture_output=True, text=True, timeout=6,
+                creationflags=_NO_WINDOW
+            )
+            gpu_name = r.stdout.strip()
+        else:
+            r = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                               capture_output=True, text=True, timeout=6)
+            gpu_name = r.stdout.splitlines()[0].strip() if r.stdout.strip() else ""
         _IS_NVIDIA_GPU = bool(gpu_name)  # 有找到 NVIDIA 卡就是 True
         log(f"[OLLAMA] WMI GPU 偵測: {gpu_name!r} → {'NVIDIA/CUDA' if _IS_NVIDIA_GPU else '非NVIDIA'}")
         _OLLAMA_NUM_PREDICT = 4096
@@ -3551,6 +3518,8 @@ class LangForgeApp:
             self.engine_mode_var = tk.StringVar(value="local")
         else:
             _saved_mode = self.config.get("engine_mode", "cloud")
+            if _saved_mode not in ("cloud", "local"):  # 舊版 "ocr" 設定自動回退雲端
+                _saved_mode = "cloud"
             if not self._ollama_available and _saved_mode == "local":
                 _saved_mode = "cloud"
             self.engine_mode_var = tk.StringVar(value=_saved_mode)
@@ -3571,13 +3540,7 @@ class LangForgeApp:
                 state=_local_state,
                 command=self._on_engine_mode_change,
             ).pack(side="left", padx=(8, 0))
-            ttk.Radiobutton(
-                eng_mode_row,
-                text=S("rb_engine_ocr"),
-                variable=self.engine_mode_var,
-                value="ocr",
-                command=self._on_engine_mode_change,
-            ).pack(side="left", padx=(8, 0))
+
 
         # ── 引擎內容容器 ──
         self.engine_container = ttk.Frame(tab1)
@@ -3713,30 +3676,10 @@ class LangForgeApp:
         # 高度補齊 spacer（讓 local_frame 與 cloud_frame 等高，防止切換時下方 UI 跳動）
         ttk.Frame(self.local_frame, height=40).pack(fill="x")
 
-        # ── OCR 引擎區塊 ──
-        self.ocr_frame = ttk.Frame(self.engine_container)
-        ocr_inner = ttk.LabelFrame(
-            self.ocr_frame,
-            text="🔍 " + S("rb_engine_ocr").lstrip("🔍 "),
-        )
-        ocr_inner.pack(fill="x", padx=2, pady=(0, 4))
-        ttk.Label(
-            ocr_inner,
-            text=S("lbl_ocr_desc"),
-            font=("Arial", 8),
-            foreground="gray",
-        ).pack(anchor="w", padx=6, pady=(4, 2))
-        self.ocr_lang_label = ttk.Label(ocr_inner, text="", font=("Arial", 8), foreground="steelblue")
-        self.ocr_lang_label.pack(anchor="w", padx=6, pady=(0, 4))
-        # 高度補齊 spacer
-        ttk.Frame(self.ocr_frame, height=80).pack(fill="x")
-
         # use_ollama_var：本地模式開啟即視為啟用
         self.use_ollama_var = tk.BooleanVar(value=(_saved_mode == "local"))
 
         # 初始顯示正確區塊
-        if not hasattr(self, "ocr_frame"):
-            self.ocr_frame = ttk.Frame(self.engine_container)
         self._apply_engine_mode(animate=False)
 
         # ── 功能按鈕群組（上2下3排列） ──
@@ -3851,15 +3794,12 @@ class LangForgeApp:
         ttk.Label(src_row, text=S("lbl_src_lang"), font=("Arial", 9), width=10).pack(side="left")
         src_combo = ttk.Combobox(src_row, textvariable=self.src_lang_var, values=GAME_LANGUAGES, state="readonly", width=38)
         src_combo.pack(side="left", padx=4)
-        self.src_lang_var.trace_add("write", lambda *_: self._update_ocr_lang_label())
 
         tgt_row = ttk.Frame(lang_frame)
         tgt_row.pack(fill="x", pady=(2, 6), padx=6)
         ttk.Label(tgt_row, text=S("lbl_tgt_lang"), font=("Arial", 9), width=10).pack(side="left")
         tgt_combo = ttk.Combobox(tgt_row, textvariable=self.tgt_lang_var, values=TARGET_LANGUAGES, state="readonly", width=38)
         tgt_combo.pack(side="left", padx=4)
-        self.tgt_lang_var.trace_add("write", lambda *_: self._update_ocr_lang_label())
-        self._update_ocr_lang_label()  # 補初始化：src/tgt 建好後才能正確顯示
 
         # ── 4. 文字排版模式 ──
         layout_lf = ttk.LabelFrame(tab2, text=S("lbl_layout").rstrip(":"))
@@ -4770,8 +4710,6 @@ class LangForgeApp:
                         text=S("session_recording"), foreground="red"))
                 self._session_capture_fail_cnt = 0
             if image_pil is not None:
-                import numpy as np
-
                 self._session_seq += 1
                 ts_str = time.strftime("%Y-%m-%d %H:%M:%S")
                 filename = f'{self._session_seq:06d}_{time.strftime("%H%M%S")}.jpg'
@@ -4788,7 +4726,7 @@ class LangForgeApp:
                 gray = image_pil.convert("L")
                 if self._session_prev_gray is not None:
                     diff = ImageChops.difference(gray, self._session_prev_gray)
-                    avg_diff = np.mean(np.array(diff))
+                    avg_diff = ImageStat.Stat(diff).mean[0]
                     if avg_diff < SESSION_STABLE_DIFF:
                         self._session_stable_cnt += 1
                     else:
@@ -4831,57 +4769,7 @@ class LangForgeApp:
             src_lang = snap.get("src_lang", self.src_lang_var.get())
             tgt_lang = snap.get("tgt_lang", self.tgt_lang_var.get())
 
-            if mode == "ocr":
-                # ── OCR 模式：EasyOCR + Google 翻譯（縮放 + 並行）──
-                if LANG_TO_BCP47.get(src_lang) == "auto":
-                    self._set_status(S("status_ocr_src_auto"), "red")
-                    return
-                self._set_status(
-                    f"{S('status_ocr_running')} | {_lang_label(src_lang)} → {_lang_label(tgt_lang)}",
-                    "orange"
-                )
-                try:
-                    import easyocr, numpy as np
-                except ImportError:
-                    self._set_status(S("status_ocr_no_easyocr"), "red")
-                    return
-
-                ocr_langs = _bcp47_to_easyocr(LANG_TO_BCP47.get(src_lang, "ja"))
-                if not hasattr(self, "_easyocr_reader") or self._easyocr_langs != ocr_langs:
-                    warnings.filterwarnings("ignore")
-                    logging.getLogger("easyocr").setLevel(logging.ERROR)
-                    self._easyocr_reader = easyocr.Reader(ocr_langs, gpu=False, verbose=False)
-                    self._easyocr_langs = ocr_langs
-
-                orig_w, orig_h = image_pil.width, image_pil.height
-                ocr_img, scale = _resize_for_ocr(image_pil)
-                img_np = np.array(ocr_img)
-                ocr_results = self._easyocr_reader.readtext(img_np)
-                ocr_results = [r for r in ocr_results if r[2] >= OCR_CONF_THRESHOLD]
-                if not ocr_results:
-                    return
-                src_bcp = LANG_TO_BCP47.get(src_lang, "auto")
-                tgt_bcp = LANG_TO_BCP47.get(tgt_lang, "zh-TW")
-                texts = [text for _, text, _ in ocr_results]
-                with ThreadPoolExecutor(max_workers=min(OCR_TRANSLATE_WORKERS, len(texts))) as pool:
-                    translated_list = list(pool.map(
-                        lambda t: _google_translate(t, src_bcp, tgt_bcp), texts
-                    ))
-                result = []
-                for (bbox, text, conf), tw in zip(ocr_results, translated_list):
-                    xs = [p[0] / scale for p in bbox]
-                    ys = [p[1] / scale for p in bbox]
-                    result.append({
-                        "tw": tw,
-                        "x": round(min(xs) / orig_w, 4),
-                        "y": round(min(ys) / orig_h, 4),
-                        "w": round((max(xs) - min(xs)) / orig_w, 4),
-                        "h": round((max(ys) - min(ys)) / orig_h, 4),
-                    })
-                model = "OCR+GoogleTranslate"
-                result = _merge_ocr_lines(result)
-
-            elif mode == "local":
+            if mode == "local":
                 # ── OLLAMA 本地模式 ──
                 ollama_model = snap.get("ollama_model", self.ollama_model_var.get() if hasattr(self, "ollama_model_var") else "")
                 if not ollama_model:
@@ -4914,7 +4802,7 @@ class LangForgeApp:
                 )
                 self._db_conn.commit()
                 log(f"場次翻譯回寫: session={self._session_id}, seq={seq}")
-                if mode not in ("local", "ocr"):
+                if mode != "local":
 
                     def _update_quota(m=model):
                         self.config["used_today"][m] = self.config["used_today"].get(m, 0) + 1
@@ -6190,6 +6078,14 @@ class LangForgeApp:
     def _grab_window_hwnd(self, hwnd, crop_top=0):
         """給定 hwnd，回傳擷取的 PIL Image（支援多螢幕 DPI 縮放）。
         進程已設為 Per-Monitor DPI Aware，座標為實體像素，不需額外縮放。"""
+        if not IS_WIN:
+            # Linux / macOS：擷取整個主螢幕（不依視窗標題）
+            img = ImageGrab.grab().convert("RGB")
+            if crop_top > 0:
+                if crop_top >= img.height:
+                    raise ValueError("crop_top 超出螢幕高度")
+                img = img.crop((0, crop_top, img.width, img.height))
+            return img
         # 取得 client 區域的實體像素座標
         cr = win32gui.GetClientRect(hwnd)
         cp0 = win32gui.ClientToScreen(hwnd, (0, 0))
@@ -6207,6 +6103,12 @@ class LangForgeApp:
 
     def _try_capture(self):
         try:
+            if not IS_WIN:
+                try:
+                    _ct = max(0, int(self.crop_top_var.get()))
+                except ValueError:
+                    _ct = 0
+                return self._grab_window_hwnd(SCREEN_HWND, _ct)
             target = self.title_var.get().lower().strip()
             if not target:
                 log("[capture] title_var 為空，無法擷取")
@@ -6393,8 +6295,8 @@ class LangForgeApp:
 
     def _trigger_auto_translate(self, image_pil):
         mode = self.engine_mode_var.get()
-        # 本地/OCR 模式不需要冷卻判斷
-        if mode not in ("local", "ocr"):
+        # 本地模式不需要冷卻判斷
+        if mode != "local":
             model = self.model_var.get()
             if self._get_remaining_cooldown(model) > 0:
                 return
@@ -6427,13 +6329,12 @@ class LangForgeApp:
         image_pil = self._try_capture()
 
         if image_pil is not None:
-            import numpy as np
             gray = image_pil.convert("L")
 
             if self._stable_prev_img is not None:
                 if gray.size == self._stable_prev_img.size:
                     diff = ImageChops.difference(gray, self._stable_prev_img)
-                    avg_diff = np.mean(np.array(diff))
+                    avg_diff = ImageStat.Stat(diff).mean[0]
 
                     if avg_diff < diff_threshold:
                         self._stable_count += 1
@@ -6632,7 +6533,7 @@ class LangForgeApp:
             self.root.after_cancel(self._elapsed_timer_id)
             self._elapsed_timer_id = None
         # 本地模式時清空冷卻欄
-        if getattr(self, "engine_mode_var", None) and self.engine_mode_var.get() in ("local", "ocr"):
+        if getattr(self, "engine_mode_var", None) and self.engine_mode_var.get() == "local":
             if hasattr(self, "cooldown_label") and self.cooldown_label.winfo_exists():
                 self.cooldown_label.config(text="")
         self._trans_start_time = time.time()
@@ -7043,6 +6944,12 @@ class LangForgeApp:
             return self._mesen_cache_rect
         # 快取失效：重新 EnumWindows
         result = [None]
+        if not IS_WIN:
+            result[0] = (0, 0, self.root.winfo_screenwidth(), self.root.winfo_screenheight())
+            self._mesen_cache_rect = result[0]
+            self._mesen_cache_title = target
+            self._mesen_cache_ts = now
+            return result[0]
 
         def _handler(h, _):
             if target in win32gui.GetWindowText(h).lower():
@@ -7433,28 +7340,6 @@ class LangForgeApp:
         save_config(self.config)
         self._apply_engine_mode(animate=True)
 
-    def _update_ocr_lang_label(self):
-        if not hasattr(self, "ocr_lang_label"):
-            return
-        if not hasattr(self, "src_lang_var") or not hasattr(self, "tgt_lang_var"):
-            return
-        if self.engine_mode_var.get() != "ocr":
-            self.ocr_lang_label.config(text="")
-            return
-        src = _lang_label(self.src_lang_var.get())
-        tgt = _lang_label(self.tgt_lang_var.get())
-        is_auto = LANG_TO_BCP47.get(self.src_lang_var.get()) == "auto"
-        if is_auto:
-            self.ocr_lang_label.config(
-                text=S("ocr_lang_auto_warn").format(src=src),
-                foreground="red"
-            )
-        else:
-            self.ocr_lang_label.config(
-                text=S("ocr_lang_pair").format(src=src, tgt=tgt),
-                foreground="steelblue"
-            )
-
     # ── 簡易模式方法 ──────────────────────────────────────────
 
     def _ensure_simple_win(self):
@@ -7471,6 +7356,8 @@ class LangForgeApp:
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         try:
+            if not IS_WIN:
+                raise OSError("非 Windows：無工作列 API，使用預設邊距")
             import ctypes.wintypes
             r = ctypes.wintypes.RECT()
             ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(r), 0)
@@ -7741,21 +7628,13 @@ class LangForgeApp:
 
     def _apply_engine_mode(self, animate: bool = True):
         mode = self.engine_mode_var.get()
-        ocr_frame = getattr(self, "ocr_frame", None)
-
         self.cloud_frame.pack_forget()
         self.local_frame.pack_forget()
-        if ocr_frame:
-            ocr_frame.pack_forget()
 
         if mode == "cloud":
             self.cloud_frame.pack(fill="x")
-        elif mode == "local":
-            self.local_frame.pack(fill="x")
         else:
-            if ocr_frame:
-                ocr_frame.pack(fill="x")
-        self._update_ocr_lang_label()
+            self.local_frame.pack(fill="x")
 
     def _update_indicators(self):
         if not hasattr(self, "_ind_auto"):
@@ -7810,7 +7689,7 @@ class LangForgeApp:
             try:
                 hwnd = win32gui.GetForegroundWindow()
                 title = win32gui.GetWindowText(hwnd).strip()
-            except Exception:
+            except Exception:  # 非 Windows（win32gui=None）也走這裡：不支援挑選視窗
                 title = ""
 
             if title and title != self.root.title():
@@ -7904,7 +7783,7 @@ class LangForgeApp:
         )
         if not filepath:
             return
-        if self.engine_mode_var.get() not in ("local", "ocr") and not self._check_cooldown_and_quota():
+        if self.engine_mode_var.get() != "local" and not self._check_cooldown_and_quota():
             return
         self._capture_in_progress = True
         self._start_elapsed_timer()
@@ -7928,7 +7807,7 @@ class LangForgeApp:
     def start_worker(self):
         if self._capture_in_progress:
             return
-        if self.engine_mode_var.get() not in ("local", "ocr") and not self._check_cooldown_and_quota():
+        if self.engine_mode_var.get() != "local" and not self._check_cooldown_and_quota():
             return
         self._capture_in_progress = True
         self._start_elapsed_timer()
@@ -7938,7 +7817,7 @@ class LangForgeApp:
     def _window_capture_task(self):
         try:
             target = self.title_var.get().lower().strip()
-            if not target:
+            if not target and IS_WIN:
                 self._set_status(S("status_no_target_win"), "red")
                 self._stamp_elapsed()
                 return
@@ -7951,7 +7830,10 @@ class LangForgeApp:
                     return False
                 return True
 
-            win32gui.EnumWindows(_handler, None)
+            if IS_WIN:
+                win32gui.EnumWindows(_handler, None)
+            else:
+                hwnd = SCREEN_HWND
             if not hwnd:
                 self._set_status(S("status_win_missing"), "red")
                 return
@@ -7969,7 +7851,7 @@ class LangForgeApp:
                 save_config(self.config)
 
             img = self._grab_window_hwnd(hwnd, crop_top)
-            win_title = win32gui.GetWindowText(hwnd)
+            win_title = win32gui.GetWindowText(hwnd) if IS_WIN else "Screen"
             if self.combo_guide_var.get():
                 self._enqueue_task({"type": "combined", "image_pil": img, "win_title": win_title, "source": "capture"})
             else:
@@ -8167,7 +8049,10 @@ class LangForgeApp:
                     return False
                 return True
 
-            win32gui.EnumWindows(_handler, None)
+            if IS_WIN:
+                win32gui.EnumWindows(_handler, None)
+            else:
+                hwnd = SCREEN_HWND
             if not hwnd:
                 self._set_status(S("status_win_missing"), "red")
                 return
@@ -8180,7 +8065,7 @@ class LangForgeApp:
                 crop_top = 0
 
             img = self._grab_window_hwnd(hwnd, crop_top)
-            win_title = win32gui.GetWindowText(hwnd)
+            win_title = win32gui.GetWindowText(hwnd) if IS_WIN else "Screen"
             self._enqueue_task({"type": "guide", "image_pil": img, "win_title": win_title, "source": "capture"})
         finally:
             self._capture_in_progress = False
@@ -8510,109 +8395,6 @@ class LangForgeApp:
             else:
                 self._set_status(S("status_combined_fail"), "red")
 
-    # ══════════════════════════════════════════
-    # 本地 OCR + 雲端 AI 翻譯
-    # ══════════════════════════════════════════
-    def _do_ocr_translate(self, image_pil, source="file", win_title="", src_lang=None, tgt_lang=None, **task):
-        # 優先使用傳入的快照值，避免在 worker thread 讀取 UI 變數
-        if src_lang is None:
-            src_lang = self.src_lang_var.get()
-        if tgt_lang is None:
-            tgt_lang = self.tgt_lang_var.get()
-        target_win = task.get("snap_target_window", self.title_var.get().strip())
-        platform   = task.get("snap_platform",      self.platform_var.get().strip())
-
-        # ── Step1：EasyOCR 辨識 ──
-        if LANG_TO_BCP47.get(src_lang) == "auto":
-            self._set_status(S("status_ocr_src_auto"), "red")
-            self._stamp_elapsed()
-            return
-        self._set_status(
-            f"{S('status_ocr_running')} | {_lang_label(src_lang)} → {_lang_label(tgt_lang)}",
-            "orange"
-        )
-        try:
-            import easyocr
-        except ImportError:
-            self._set_status(S("status_ocr_no_easyocr"), "red")
-            self._stamp_elapsed()
-            return
-
-        try:
-            ocr_langs = _bcp47_to_easyocr(LANG_TO_BCP47.get(src_lang, "ja"))
-            if not hasattr(self, "_easyocr_reader") or self._easyocr_langs != ocr_langs:
-                log(f"[OCR] 初始化 EasyOCR langs={ocr_langs}")
-                warnings.filterwarnings("ignore")
-                logging.getLogger("easyocr").setLevel(logging.ERROR)
-                logging.getLogger("torch").setLevel(logging.ERROR)
-                self._easyocr_reader = easyocr.Reader(ocr_langs, gpu=False, verbose=False)
-                self._easyocr_langs = ocr_langs
-
-            import numpy as np
-            # 縮放圖片以加速 EasyOCR（保留原始尺寸用於座標還原）
-            orig_w, orig_h = image_pil.width, image_pil.height
-            ocr_img, scale = _resize_for_ocr(image_pil)
-            img_np = np.array(ocr_img)
-            ocr_results = self._easyocr_reader.readtext(img_np)
-            ocr_results = [r for r in ocr_results if r[2] >= OCR_CONF_THRESHOLD]
-            if not ocr_results:
-                self._set_status(S("status_ocr_no_text"), "gray")
-                self._stamp_elapsed()
-                return
-            log(f"[OCR] 偵測到 {len(ocr_results)} 個文字區塊（信心值 ≥ {OCR_CONF_THRESHOLD}，縮放比={scale:.2f}）")
-        except Exception as e:
-            self._set_status(S("status_ocr_fail").format(msg=str(e)[:60]), "red")
-            self._stamp_elapsed()
-            return
-
-        # ── Step2：Google 翻譯（並行）──
-        self._set_status(S("status_ocr_translating"), "orange")
-        try:
-            src_bcp = LANG_TO_BCP47.get(src_lang, "auto")
-            tgt_bcp = LANG_TO_BCP47.get(tgt_lang, "zh-TW")
-            texts = [text for _, text, _ in ocr_results]
-
-            with ThreadPoolExecutor(max_workers=min(OCR_TRANSLATE_WORKERS, len(texts))) as pool:
-                translated_list = list(pool.map(
-                    lambda t: _google_translate(t, src_bcp, tgt_bcp), texts
-                ))
-        except Exception as e:
-            self._set_status(S("status_gt_fail").format(msg=str(e)[:60]), "red")
-            self._stamp_elapsed()
-            return
-
-        # ── Step3：組合 segments（座標還原至原始尺寸）──
-        segments = []
-        for (bbox, text, conf), tw in zip(ocr_results, translated_list):
-            # bbox 座標是縮放後的，需除以 scale 還原，再正規化至 0~1
-            xs = [p[0] / scale for p in bbox]
-            ys = [p[1] / scale for p in bbox]
-            segments.append({
-                "tw": tw,
-                "x": round(min(xs) / orig_w, 4),
-                "y": round(min(ys) / orig_h, 4),
-                "w": round((max(xs) - min(xs)) / orig_w, 4),
-                "h": round((max(ys) - min(ys)) / orig_h, 4),
-            })
-
-        if not segments:
-            self._set_status(S("status_ocr_no_result"), "gray")
-            self._stamp_elapsed()
-            return
-
-        # ── Step4：儲存 + 渲染 ──
-        self._set_status(S("status_ocr_done").format(n=len(segments)), "green")
-        self._stamp_elapsed()
-
-        if source == "capture" and segments:
-            self._save_translation_log(
-                segments, "OCR+GoogleTranslate", win_title, image_pil,
-                target_window=target_win,
-                platform=platform,
-            )
-
-        self._after(0, lambda _s=_merge_ocr_lines(segments), _img=image_pil: self.render(_s, _img, source))
-
     def _do_translate(self, image_pil, source="file", win_title="", **task):
         log(f"[進階模式] 翻譯觸發 source={source}")
         # 任務實際開始執行時重置計時器（在主執行緒透過 after 同步執行）
@@ -8641,16 +8423,6 @@ class LangForgeApp:
             ollama_timeout = OLLAMA_TIMEOUT
 
         translate_prompt = build_translate_prompt(src_lang, tgt_lang)
-
-        # ── OCR 模式優先判斷 ──
-        if engine_mode == "ocr":
-            self._do_ocr_translate(
-                image_pil, source, win_title,
-                src_lang=src_lang, tgt_lang=tgt_lang,
-                snap_target_window=target_win,
-                snap_platform=platform,
-            )
-            return
 
         # ── OLLAMA 優先判斷 ──
         use_ollama = (engine_mode == "local" and self._ollama_available)
@@ -9506,13 +9278,14 @@ class SplashScreen:
 if __name__ == "__main__":
     # 設定 Per-Monitor DPI Aware，讓 Tkinter 直接用實體像素座標
     # 避免 Windows DPI 虛擬化造成 geometry() 座標不穩定
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
-    except Exception:
+    if IS_WIN:
         try:
-            ctypes.windll.user32.SetProcessDPIAware()
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
         except Exception:
-            pass
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
     root = tk.Tk()
     root.withdraw()  # 先隱藏，避免未設定位置就閃現
     root.update_idletasks()  # 讓 DPI 設定生效後再建立 UI
