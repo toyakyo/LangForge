@@ -53,7 +53,17 @@ jobs:
             --collect-all=google \
             --collect-all=anthropic \
             --collect-all=openai \
-            --collect-all=groq
+            --collect-all=groq \
+            --hidden-import=tkinter --hidden-import=tkinter.ttk \
+            --hidden-import=tkinter.filedialog --hidden-import=tkinter.messagebox \
+            --hidden-import=tkinter.font --hidden-import=tkinter.scrolledtext \
+            --hidden-import=tkinter.simpledialog --hidden-import=tkinter.colorchooser \
+            --hidden-import=PIL.Image --hidden-import=PIL.ImageDraw \
+            --hidden-import=PIL.ImageFont --hidden-import=PIL.ImageTk \
+            --hidden-import=PIL.ImageGrab --hidden-import=PIL.ImageChops \
+            --hidden-import=PIL.ImageStat \
+            --hidden-import=sqlite3 --hidden-import=uuid --hidden-import=locale \
+            --hidden-import=datetime --hidden-import=hashlib --hidden-import=webbrowser
           ls -lh dist/
 
       - name: Smoke test - app stays alive for 20s (Linux, Xvfb)
