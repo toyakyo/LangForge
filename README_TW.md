@@ -15,7 +15,6 @@
 - 🎮 遊戲截圖 AI 翻譯，結果以疊圖方式顯示於原畫面
 - 🌐 支援 10 組主流雲端引擎：Gemini、Groq、Mistral、OpenAI、Claude、Grok、HuggingFace、Together AI、Cerebras、NVIDIA NIM
 - 🦙 本地 OLLAMA 引擎（完全離線，無需 API Key）
-- 🔍 本地 OCR 模式（EasyOCR + Google 翻譯，完全免費）
 - 📟 簡易模式（Tab 7）：精簡介面，專注本地引擎，依硬體挑選最適 OLLAMA 模型
 - 💾 歷史翻譯紀錄與場次錄製回放功能（含即時延遲播放）
 - 🗺️ AI 攻略分析（遊玩中同步取得攻略建議）
@@ -60,15 +59,6 @@ python LangForge.py
 
 ## 快速開始
 
-### 零設定版（新手推薦）
-
-1. 執行 `LangForge.exe`
-2. 選擇 **🔍 本地 OCR + Google 翻譯**
-3. 在「擷取設定」頁籤輸入遊戲視窗標題
-4. 點擊「視窗擷取翻譯」完成！
-
-> 無需 API Key，無需帳號。
-
 ### 雲端引擎版（翻譯品質最佳）
 
 1. 至 [aistudio.google.com](https://aistudio.google.com/apikey) 申請免費 Gemini API Key
@@ -103,7 +93,6 @@ python LangForge.py
 | Claude（Anthropic） | claude-sonnet-4-6 | 💳 付費 | 語意理解強 |
 | Grok（xAI） | grok-2-vision-1212 | 💳 付費 | 旗艦多模態模型 |
 | 🦙 OLLAMA | 任意視覺模型 | ✅ 完全免費 | 離線使用，無需 API Key |
-| 🔍 本地 OCR | EasyOCR + Google 翻譯 | ✅ 完全免費 | 零設定，無配額限制 |
 
 ---
 
@@ -111,13 +100,12 @@ python LangForge.py
 
 | 項目 | 需求 |
 | --- | --- |
-| 作業系統 | Windows 10 / 11（64-bit 建議） |
-| 網路 | 使用雲端引擎時需連線；OLLAMA 與 OCR 模式可離線使用 |
-| API Key | 使用雲端引擎需至少一組；OLLAMA 及本地 OCR 模式無需 |
+| 作業系統 | Windows 10 / 11（64-bit 建議）。Linux（Ubuntu，X11）與 macOS（Apple Silicon）為實驗版：僅支援整個螢幕擷取，無視窗標題擷取與全域快捷鍵 |
+| 網路 | 使用雲端引擎時需連線；OLLAMA 可離線使用 |
+| API Key | 使用雲端引擎需至少一組；使用 OLLAMA 無需 |
 | 儲存空間 | 建議預留 1GB 以上（翻譯截圖與場次錄製會持續累積） |
 | 顯示卡（OLLAMA） | 建議 NVIDIA GPU 4GB+ VRAM；僅 CPU 亦可但速度較慢 |
 | OLLAMA（選用） | 使用本地引擎需另行安裝 [ollama.com](https://ollama.com) |
-| EasyOCR（選用） | 使用本地 OCR 模式需安裝：`pip install easyocr` |
 
 ---
 

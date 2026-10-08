@@ -21,13 +21,7 @@ Designed for players who want to enjoy Japanese, Korean, or any foreign-language
 
 ---
 
-## 🔥 Three Translation Modes
-
-### 🔍 Local OCR + Google Translate — Zero Setup, Zero Cost
-
-No API key. No account. No configuration whatsoever.  
-LangForge uses **EasyOCR** locally to detect and position text, then routes through **Google Translate** (free, no quota limits) for the actual translation.  
-**→ Best for: first-time users, or anyone who doesn't want to create API accounts.**
+## 🔥 Two Translation Modes
 
 ### 🦙 OLLAMA Local Engine — Full Offline AI
 
@@ -70,16 +64,7 @@ LangForge automatically rotates engines when a free quota runs out — keeping t
 
 ## 🚀 Getting Started
 
-### Option A — Zero Setup (Recommended for First-Time Users)
-
-1. Download and run `LangForge.exe`
-2. Select **🔍 Local OCR + Google Translate** as your engine
-3. Set your target game window title in the **Capture** tab
-4. Click **Capture & Translate** — done!
-
-> No API key needed. No account required.
-
-### Option B — Cloud Engine (Best Quality, Free)
+### Option A — Cloud Engine (Best Quality, Free)
 
 1. Get a free **Gemini API Key** from [aistudio.google.com](https://aistudio.google.com/apikey) (Google account required, no credit card)
 2. Run LangForge, select **☁ Cloud Engine → Gemini**
@@ -87,7 +72,7 @@ LangForge automatically rotates engines when a free quota runs out — keeping t
 
 > For maximum free quota, also set up [Groq](https://console.groq.com/keys), [Mistral](https://console.mistral.ai/), [Together AI](https://api.together.xyz/settings/api-keys) and [Cerebras](https://cloud.cerebras.ai/) — LangForge rotates them automatically.
 
-### Option C — Fully Offline (OLLAMA)
+### Option B — Fully Offline (OLLAMA)
 
 1. Install [OLLAMA](https://ollama.com)
 2. Run `ollama pull llava` to download a vision model
@@ -101,8 +86,8 @@ LangForge automatically rotates engines when a free quota runs out — keeping t
 ```bash
 git clone https://github.com/toyakyo/LangForge.git
 cd LangForge
-pip install anthropic easyocr google-genai groq keyboard mistralai numpy openai pillow pywin32
-python LangForge.py
+pip install -r requirements.txt
+python main.py
 ```
 
 ---
@@ -123,7 +108,6 @@ python LangForge.py
 | **Claude** | Haiku / Sonnet / Opus | Paid | Strong semantic understanding |
 | **Grok** | grok-2-vision-1212 / grok-4 | Paid | xAI flagship multimodal |
 | **🦙 OLLAMA** | Any vision model | Unlimited (local) | Fully offline, no API key |
-| **🔍 OCR + Google** | EasyOCR + Google Translate | Unlimited (free) | Zero setup required |
 
 > ⚠️ Free quota numbers are subject to change. Check each provider's official announcements for the latest limits.
 
@@ -135,7 +119,7 @@ LangForge is verified using **Microsoft Process Monitor (Sysinternals)**.
 
 The application makes **only the API calls required for translation** — to the AI engine you have selected. No data is sent to any developer-controlled server.
 
-- ✅ API Keys stored locally in `configs.json`, encrypted with your machine ID
+- ✅ API Keys stored locally in `langforge/config/configs.json`, encrypted with your machine ID
 - ✅ No upload of screenshots or personal data
 - ✅ No connection to developer servers
 - ✅ No remote license verification
@@ -163,29 +147,28 @@ Get-FileHash .\LangForge.exe -Algorithm SHA256
 
 | Item | Requirement |
 | --- | --- |
-| OS | Windows 10 / 11 (64-bit recommended) |
-| Network | Required for cloud engines; OLLAMA and OCR modes work offline |
-| API Key | Required for cloud engines; not required for OLLAMA or OCR mode |
+| OS | Windows 10 / 11 (64-bit recommended). Linux (Ubuntu, X11) and macOS (Apple Silicon) builds are experimental: full-screen capture only, no window-title capture or global hotkeys |
+| Network | Required for cloud engines; OLLAMA works offline |
+| API Key | Required for cloud engines; not required for OLLAMA |
 | Storage | 1GB+ recommended (translation history and session recordings accumulate locally) |
 | GPU (OLLAMA) | NVIDIA GPU with 4GB+ VRAM recommended for local inference |
 | OLLAMA | Optional — install from [ollama.com](https://ollama.com) for local engine |
-| EasyOCR | Optional — `pip install easyocr` for local OCR mode |
 
 ---
 
 ## 📁 Project Structure
 
 ```
-LangForge/
-├── LangForge.py          # Main application
-├── platforms.json        # Game platform definitions
-├── emulators.json        # Emulator definitions
-├── requirements.txt      # Python dependencies
-├── configs.json          # User config (auto-generated, API keys encrypted)
-├── favicon.ico           # App icon
-└── translation_logs/     # SQLite DB + screenshots (auto-generated)
-    ├── langforge.db
-    └── screenshots/
+LangForge_Community/
+├── main.py                       # Entry point
+├── requirements.txt              # Python dependencies
+├── favicon.ico                   # App icon
+└── langforge/
+    ├── core/langforge.py         # Main application
+    ├── asset/data/               # platforms.json, emulators.json
+    ├── asset/icons/              # App icons
+    ├── config/configs.json       # User config (auto-generated, API keys encrypted)
+    └── translation_logs/         # SQLite DB + screenshots (auto-generated)
 ```
 
 ---
@@ -195,7 +178,7 @@ LangForge/
 - [x] Cloud engine support (Gemini, Groq, Mistral, OpenAI, Claude, Grok)
 - [x] HuggingFace / Together AI / Cerebras / NVIDIA NIM engines
 - [x] OLLAMA local engine
-- [x] Local OCR + Google Translate mode (zero setup)
+- [x] ~~Local OCR + Google Translate mode~~ (removed in V1.5.14)
 - [x] Simple Mode (Tab 7) — streamlined local-engine interface
 - [x] Session recording & playback with live delay mode
 - [x] AI walkthrough analysis
