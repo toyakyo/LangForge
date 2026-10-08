@@ -1,4 +1,4 @@
-"""LangForge V1.5.14
+"""LangForge V1.5.15
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -250,13 +250,13 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.5.14"
+ABOUT_VERSION = "V1.5.15"
 DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
 ABOUT_LICENSE = "Copyright © 2026 GoOnSoft. All rights reserved."
 TUTORIAL_URL = "https://goonsoft.tw2.nde.tw/tutorial/tutorial.php"
-# 檢查更新：讀取此 JSON {"version": "V1.5.14", "url": "下載頁"}（僅提醒，不下載）
+# 檢查更新：讀取此 JSON {"version": "V1.5.15", "url": "下載頁"}（僅提醒，不下載）
 UPDATE_URL = "https://goonsoft.tw2.nde.tw/tutorial/version.json"
 
 # ==========================================
@@ -2313,6 +2313,17 @@ def _detect_infer_backend():
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+def _system_env() -> dict:
+    """子行程用環境變數：還原 PyInstaller 在 Linux 改過的 LD_LIBRARY_PATH，
+    否則 curl / ollama 等系統程式會載入打包內的函式庫而失敗。"""
+    env = os.environ.copy()
+    if "LD_LIBRARY_PATH_ORIG" in env:
+        env["LD_LIBRARY_PATH"] = env["LD_LIBRARY_PATH_ORIG"]
+    else:
+        env.pop("LD_LIBRARY_PATH", None)
+    return env
+
+
 def _detect_ollama_num_predict() -> int:
     """WMI 偵測 GPU 廠牌，決定手動覆蓋要套用 CUDA 還是非 CUDA 那組。
     num_predict 兩邊都是 4096：OLLAMA 預設 num_ctx 為 4096，
@@ -3076,15 +3087,15 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.5.14")
+        self.root.title("LangForge  V1.5.15")
         _days_left = _oem_license_days_left()
         if _days_left is not None:
             if _days_left < 0:
-                self.root.title("LangForge  V1.5.14  －  " + S("status_oem_expired").format(
+                self.root.title("LangForge  V1.5.15  －  " + S("status_oem_expired").format(
                     date=OEM_LICENSE_EXPIRY.replace("-", "/")))
                 log(f"[OEM] 授權評估期已於 {OEM_LICENSE_EXPIRY} 屆期")
             elif _days_left <= OEM_LICENSE_WARN_DAYS:
-                self.root.title("LangForge  V1.5.14  －  " + S("oem_countdown").format(days=_days_left))
+                self.root.title("LangForge  V1.5.15  －  " + S("oem_countdown").format(days=_days_left))
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
             else:
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
@@ -7202,13 +7213,30 @@ class LangForgeApp:
         log(f"[OLLAMA] 重新偵測完成，找到 {count} 個模型")
 
     def _oem_install_ollama(self):
-        """OEM: 以 PowerShell 直接安裝 OLLAMA，並開始輪詢偵測完成。"""
+        """安裝 OLLAMA 並開始輪詢偵測完成。
+        Windows：PowerShell 腳本；macOS：開啟官方下載頁（安裝 .app）；
+        Linux：在終端機執行官方 install.sh（需 sudo 密碼），找不到終端機則開下載頁。
+        """
         try:
-            subprocess.Popen(
-                ["powershell", "-ExecutionPolicy", "Bypass", "-Command",
-                 "irm https://ollama.com/install.ps1 | iex"],
-                creationflags=subprocess.CREATE_NEW_CONSOLE
-            )
+            if IS_WIN:
+                subprocess.Popen(
+                    ["powershell", "-ExecutionPolicy", "Bypass", "-Command",
+                     "irm https://ollama.com/install.ps1 | iex"],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE
+                )
+            elif IS_MAC:
+                webbrowser.open("https://ollama.com/download/mac")
+            else:
+                _cmd = ("curl -fsSL https://ollama.com/install.sh | sh; "
+                        "echo; read -r -p 'Press Enter to close...' _")
+                _terms = [("x-terminal-emulator", "-e"), ("gnome-terminal", "--"),
+                          ("konsole", "-e"), ("xfce4-terminal", "-e"), ("xterm", "-e")]
+                for _t, _flag in _terms:
+                    if shutil.which(_t):
+                        subprocess.Popen([_t, _flag, "bash", "-c", _cmd], env=_system_env())
+                        break
+                else:
+                    webbrowser.open("https://ollama.com/download/linux")
         except Exception as e:
             log(f"[OEM] 啟動安裝失敗: {e}")
         self._set_status(S("status_oem_checking"), "blue")
@@ -7255,7 +7283,7 @@ class LangForgeApp:
                 result = subprocess.run(
                     ["ollama", "pull", "gemma4:12b-it-qat"],
                     capture_output=True, text=True, timeout=3600,
-                    creationflags=_NO_WINDOW
+                    creationflags=_NO_WINDOW, env=_system_env()
                 )
                 if result.returncode == 0:
                     self.root.after(0, lambda: self._set_status(S("status_oem_pull_done"), "green"))
@@ -7286,7 +7314,7 @@ class LangForgeApp:
                     if name:
                         subprocess.run(["ollama", "stop", name],
                                        timeout=10, capture_output=True,
-                                       creationflags=_NO_WINDOW)
+                                       creationflags=_NO_WINDOW, env=_system_env())
                         log(f"[OLLAMA] 切換模型：已停止 {name}")
                 new_model = getattr(self, "ollama_model_var", None)
                 if new_model:
