@@ -1,4 +1,4 @@
-"""LangForge V1.5.12
+"""LangForge V1.5.13
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -105,9 +105,9 @@ if IS_FROZEN:
 
 elif 'langforge' in current_file and os.path.sep + 'core' + os.path.sep in current_file:
     # 環境 2：Git 模組化結構
-    # 路徑：D:\source\GitHub\LangForge\langforge\core\langforge.py
+    # 路徑：D:\source\GitHub\LangForge\LangForge_Community\langforge\core\langforge.py
     ENV_MODE = 'GIT'
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))  # 往上3層到 LangForge/
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))  # 往上3層到 LangForge_Community/
 
 else:
     # 環境 1：開發環境（單檔）
@@ -239,7 +239,7 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.5.12"
+ABOUT_VERSION = "V1.5.13"
 DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
@@ -499,6 +499,15 @@ UI_STRINGS = {
         "update_available": "發現新版本 {new}（目前 {cur}）。\n\n是否開啟下載頁面？",
         "update_latest": "目前已是最新版本（{cur}）。",
         "update_failed": "目前無法連線到更新伺服器，請稍後再試。",
+        "timing_api_total": "耗時:(API:{api}/整體:{total})",
+        "timing_total": "耗時:(整體:{total})",
+        "quota_unknown": "(配額未知)",
+        "oem_ollama_frame": "OLLAMA 設定",
+        "monitor_watching": "監視中",
+        "ocr_lang_auto_warn": "⚠ 遊戲語言: {src}（OCR 不支援，請改為指定語言）",
+        "ocr_lang_pair": "遊戲語言: {src}　→　譯文: {tgt}",
+        "status_choose_local_model": "請選擇本地模型",
+        "guide_progress_header": "▎目前進度",
         "menu_view": "檢視",
         "menu_switch_lang": "切換介面語言",
         "menu_lang_zh": "中文",
@@ -907,6 +916,15 @@ UI_STRINGS = {
         "update_available": "New version {new} is available (current {cur}).\n\nOpen the download page?",
         "update_latest": "You are up to date ({cur}).",
         "update_failed": "Unable to connect to the update server right now. Please try again later.",
+        "timing_api_total": "Elapsed:(API:{api}/Total:{total})",
+        "timing_total": "Elapsed:(Total:{total})",
+        "quota_unknown": "(quota unknown)",
+        "oem_ollama_frame": "OLLAMA Setup",
+        "monitor_watching": "Monitoring",
+        "ocr_lang_auto_warn": "⚠ Game language: {src} (not supported by OCR; please choose a specific language)",
+        "ocr_lang_pair": "Game language: {src}  →  Translation: {tgt}",
+        "status_choose_local_model": "Please select a local model",
+        "guide_progress_header": "▎Current Progress",
         "menu_view": "View",
         "menu_switch_lang": "Switch UI Language",
         "menu_lang_zh": "中文",
@@ -1047,7 +1065,7 @@ def _get_monitors():
         for i, m in enumerate(monitors):
             label = f'Screen {i+1}  ({m["w"]}x{m["h"]})' if CURRENT_LANG == "en" else f'螢幕 {i+1}  ({m["w"]}x{m["h"]})'
             result.append({"index": i + 1, "label": label, **m})
-        return result if result else [{"index": 1, "label": "螢幕 1", "x": 0, "y": 0, "w": 1920, "h": 1080}]
+        return result if result else [{"index": 1, "label": "Screen 1" if CURRENT_LANG == "en" else "螢幕 1", "x": 0, "y": 0, "w": 1920, "h": 1080}]
     except Exception:
         return [
             {
@@ -2329,6 +2347,10 @@ def _detect_infer_backend():
     return _INFER_BACKEND_CACHE
 
 
+# 打包成視窗版 EXE 時，子行程不可彈出 console 視窗
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+
 def _detect_ollama_num_predict() -> int:
     """WMI 偵測 GPU 廠牌，決定手動覆蓋要套用 CUDA 還是非 CUDA 那組。
     num_predict 兩邊都是 4096：OLLAMA 預設 num_ctx 為 4096，
@@ -2343,7 +2365,8 @@ def _detect_ollama_num_predict() -> int:
              "(Get-CimInstance Win32_VideoController | "
              "Where-Object {$_.Name -like '*NVIDIA*'} | "
              "Select-Object -First 1).Name"],
-            capture_output=True, text=True, timeout=6
+            capture_output=True, text=True, timeout=6,
+            creationflags=_NO_WINDOW
         )
         gpu_name = r.stdout.strip()
         _IS_NVIDIA_GPU = bool(gpu_name)  # 有找到 NVIDIA 卡就是 True
@@ -3086,15 +3109,15 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.5.12")
+        self.root.title("LangForge  V1.5.13")
         _days_left = _oem_license_days_left()
         if _days_left is not None:
             if _days_left < 0:
-                self.root.title("LangForge  V1.5.12  －  " + S("status_oem_expired").format(
+                self.root.title("LangForge  V1.5.13  －  " + S("status_oem_expired").format(
                     date=OEM_LICENSE_EXPIRY.replace("-", "/")))
                 log(f"[OEM] 授權評估期已於 {OEM_LICENSE_EXPIRY} 屆期")
             elif _days_left <= OEM_LICENSE_WARN_DAYS:
-                self.root.title("LangForge  V1.5.12  －  " + S("oem_countdown").format(days=_days_left))
+                self.root.title("LangForge  V1.5.13  －  " + S("oem_countdown").format(days=_days_left))
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
             else:
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
@@ -3622,7 +3645,7 @@ class LangForgeApp:
         self._oem_install_frames = []
         self._oem_pull_btns = []
         if not self._ollama_available:
-            _oem_frame = ttk.LabelFrame(self.local_frame, text="OLLAMA 設定")
+            _oem_frame = ttk.LabelFrame(self.local_frame, text=S("oem_ollama_frame"))
             _oem_frame.pack(fill="x", padx=2, pady=(0, 4))
             self._oem_install_frames.append(_oem_frame)
             oem_row = ttk.Frame(_oem_frame)
@@ -6587,8 +6610,6 @@ class LangForgeApp:
         self.root.after(0, _update)
         self._last_status_color = color
 
-    _MONITOR_DOTS = ["監視中 ●", "監視中 ○"]
-
     def _start_monitor_loop(self):
         if self._monitor_job:
             self.root.after_cancel(self._monitor_job)
@@ -6601,7 +6622,7 @@ class LangForgeApp:
             self._monitor_job = None
             return
         if self._last_status_color == "gray":
-            dot = self._MONITOR_DOTS[self._monitor_dot_idx % len(self._MONITOR_DOTS)]
+            dot = f"{S('monitor_watching')} {'●○'[self._monitor_dot_idx % 2]}"
             self._monitor_dot_idx += 1
             self._set_status(dot, "gray")
         self._monitor_job = self.root.after(1200, self._monitor_loop)
@@ -6648,9 +6669,9 @@ class LangForgeApp:
             if not (hasattr(self, "timing_label") and self.timing_label.winfo_exists()):
                 return
             if api is not None:
-                txt = f"耗時:(API:{self._fmt_time(api)}/整體:{self._fmt_time(total)})"
+                txt = S("timing_api_total").format(api=self._fmt_time(api), total=self._fmt_time(total))
             else:
-                txt = f"耗時:(整體:{self._fmt_time(total)})"
+                txt = S("timing_total").format(total=self._fmt_time(total))
             self.timing_label.config(text=txt, foreground="steelblue")
             if hasattr(self, "simple_elapsed_label") and self.simple_elapsed_label.winfo_exists():
                 self.simple_elapsed_label.config(
@@ -6855,7 +6876,7 @@ class LangForgeApp:
         if limit == 0:
             self.quota_label.config(text=f"▶ {model}:  {S('quota_no_free')}", foreground="red")
         elif limit == -1:
-            self.quota_label.config(text=f"▶ {model}:  {used}/? RPD  (配額未知)", foreground="#cc7700")
+            self.quota_label.config(text=f"▶ {model}:  {used}/? RPD  {S('quota_unknown')}", foreground="#cc7700")
         else:
             rpm_str = f"RPM={rpm}" if rpm > 0 else ""
             color = "brown" if used < limit else "red"
@@ -7326,7 +7347,8 @@ class LangForgeApp:
             try:
                 result = subprocess.run(
                     ["ollama", "pull", "gemma4:12b-it-qat"],
-                    capture_output=True, text=True, timeout=3600
+                    capture_output=True, text=True, timeout=3600,
+                    creationflags=_NO_WINDOW
                 )
                 if result.returncode == 0:
                     self.root.after(0, lambda: self._set_status(S("status_oem_pull_done"), "green"))
@@ -7356,7 +7378,8 @@ class LangForgeApp:
                     name = m.get("name", "")
                     if name:
                         subprocess.run(["ollama", "stop", name],
-                                       timeout=10, capture_output=True)
+                                       timeout=10, capture_output=True,
+                                       creationflags=_NO_WINDOW)
                         log(f"[OLLAMA] 切換模型：已停止 {name}")
                 new_model = getattr(self, "ollama_model_var", None)
                 if new_model:
@@ -7423,12 +7446,12 @@ class LangForgeApp:
         is_auto = LANG_TO_BCP47.get(self.src_lang_var.get()) == "auto"
         if is_auto:
             self.ocr_lang_label.config(
-                text=f"⚠ 遊戲語言: {src}（OCR 不支援，請改為指定語言）",
+                text=S("ocr_lang_auto_warn").format(src=src),
                 foreground="red"
             )
         else:
             self.ocr_lang_label.config(
-                text=f"遊戲語言: {src}　→　譯文: {tgt}",
+                text=S("ocr_lang_pair").format(src=src, tgt=tgt),
                 foreground="steelblue"
             )
 
@@ -7600,11 +7623,11 @@ class LangForgeApp:
             if image_pil is None:
                 image_pil = self._try_capture()
             if image_pil is None:
-                self._set_status("找不到目標視窗", "red")
+                self._set_status(S("status_win_missing"), "red")
                 return
             model = self.simple_model_var.get() if hasattr(self, "simple_model_var") else ""
             if not model:
-                self._set_status("請選擇本地模型", "red")
+                self._set_status(S("status_choose_local_model"), "red")
                 return
             src_lang = self.src_lang_var.get()
             tgt_lang = self.tgt_lang_var.get()
@@ -8296,7 +8319,7 @@ class LangForgeApp:
         y += 10
 
         # ── 標題：目前進度 ──
-        draw.text((pad, y), "▎目前進度", font=font_header, fill=(255, 215, 0))  # 金色
+        draw.text((pad, y), S("guide_progress_header"), font=font_header, fill=(255, 215, 0))  # 金色
         y += 32
 
         # 進度內容
