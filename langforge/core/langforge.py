@@ -1,4 +1,4 @@
-"""LangForge V1.5.13
+"""LangForge V1.5.14
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -250,13 +250,13 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.5.13"
+ABOUT_VERSION = "V1.5.14"
 DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
 ABOUT_LICENSE = "Copyright © 2026 GoOnSoft. All rights reserved."
 TUTORIAL_URL = "https://goonsoft.tw2.nde.tw/tutorial/tutorial.php"
-# 檢查更新：讀取此 JSON {"version": "V1.5.13", "url": "下載頁"}（僅提醒，不下載）
+# 檢查更新：讀取此 JSON {"version": "V1.5.14", "url": "下載頁"}（僅提醒，不下載）
 UPDATE_URL = "https://goonsoft.tw2.nde.tw/tutorial/version.json"
 
 # ==========================================
@@ -3076,15 +3076,15 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.5.13")
+        self.root.title("LangForge  V1.5.14")
         _days_left = _oem_license_days_left()
         if _days_left is not None:
             if _days_left < 0:
-                self.root.title("LangForge  V1.5.13  －  " + S("status_oem_expired").format(
+                self.root.title("LangForge  V1.5.14  －  " + S("status_oem_expired").format(
                     date=OEM_LICENSE_EXPIRY.replace("-", "/")))
                 log(f"[OEM] 授權評估期已於 {OEM_LICENSE_EXPIRY} 屆期")
             elif _days_left <= OEM_LICENSE_WARN_DAYS:
-                self.root.title("LangForge  V1.5.13  －  " + S("oem_countdown").format(days=_days_left))
+                self.root.title("LangForge  V1.5.14  －  " + S("oem_countdown").format(days=_days_left))
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
             else:
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
