@@ -1,4 +1,4 @@
-"""LangForge V1.5.15
+"""LangForge V1.5.16
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -250,13 +250,13 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.5.15"
+ABOUT_VERSION = "V1.5.16"
 DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
 ABOUT_LICENSE = "Copyright © 2026 GoOnSoft. All rights reserved."
 TUTORIAL_URL = "https://goonsoft.tw2.nde.tw/tutorial/tutorial.php"
-# 檢查更新：讀取此 JSON {"version": "V1.5.15", "url": "下載頁"}（僅提醒，不下載）
+# 檢查更新：讀取此 JSON {"version": "V1.5.16", "url": "下載頁"}（僅提醒，不下載）
 UPDATE_URL = "https://goonsoft.tw2.nde.tw/tutorial/version.json"
 
 # ==========================================
@@ -2313,6 +2313,29 @@ def _detect_infer_backend():
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+def _find_ollama_exe():
+    """找 ollama 執行檔。剛安裝完時本程式的 PATH 是舊的，shutil.which 會找不到，
+    所以另外檢查各平台的預設安裝位置。找不到回傳 None。"""
+    exe = shutil.which("ollama")
+    if exe:
+        return exe
+    _cands = []
+    if IS_WIN:
+        for _env in ("LOCALAPPDATA", "ProgramFiles"):
+            _base = os.environ.get(_env)
+            if _base:
+                _cands.append(os.path.join(_base, "Programs" if _env == "LOCALAPPDATA" else "", "Ollama", "ollama.exe"))
+    elif IS_MAC:
+        _cands = ["/usr/local/bin/ollama", "/opt/homebrew/bin/ollama",
+                  "/Applications/Ollama.app/Contents/Resources/ollama"]
+    else:
+        _cands = ["/usr/local/bin/ollama", "/usr/bin/ollama", "/bin/ollama"]
+    for _p in _cands:
+        if os.path.isfile(_p):
+            return _p
+    return None
+
+
 def _system_env() -> dict:
     """子行程用環境變數：還原 PyInstaller 在 Linux 改過的 LD_LIBRARY_PATH，
     否則 curl / ollama 等系統程式會載入打包內的函式庫而失敗。"""
@@ -3087,15 +3110,15 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.5.15")
+        self.root.title("LangForge  V1.5.16")
         _days_left = _oem_license_days_left()
         if _days_left is not None:
             if _days_left < 0:
-                self.root.title("LangForge  V1.5.15  －  " + S("status_oem_expired").format(
+                self.root.title("LangForge  V1.5.16  －  " + S("status_oem_expired").format(
                     date=OEM_LICENSE_EXPIRY.replace("-", "/")))
                 log(f"[OEM] 授權評估期已於 {OEM_LICENSE_EXPIRY} 屆期")
             elif _days_left <= OEM_LICENSE_WARN_DAYS:
-                self.root.title("LangForge  V1.5.15  －  " + S("oem_countdown").format(days=_days_left))
+                self.root.title("LangForge  V1.5.16  －  " + S("oem_countdown").format(days=_days_left))
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
             else:
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
@@ -3271,7 +3294,7 @@ class LangForgeApp:
             self._oem_pull_btns.append(_btn7)
             if not hasattr(self, "_oem_install_frames"):
                 self._oem_install_frames = []
-            self._oem_install_frames.append(eng_lf)
+            self._oem_install_frames.append(oem_row7)  # 只隱藏安裝列，不可隱藏整個引擎區塊
         _init_ollama = _init_ollama_pre
         self.simple_model_var = self.ollama_model_var
         # 過濾開關列（與 Tab1 一致）
@@ -3616,8 +3639,11 @@ class LangForgeApp:
         self.local_frame = ttk.Frame(self.engine_container)
 
         # ── OEM 快速設定按鈕（僅在 OLLAMA 未安裝時顯示）──
-        self._oem_install_frames = []
-        self._oem_pull_btns = []
+        # 不可重設清單：簡易模式（Tab 7）已先登記了它自己的按鈕與安裝列
+        if not hasattr(self, "_oem_install_frames"):
+            self._oem_install_frames = []
+        if not hasattr(self, "_oem_pull_btns"):
+            self._oem_pull_btns = []
         if not self._ollama_available:
             _oem_frame = ttk.LabelFrame(self.local_frame, text=S("oem_ollama_frame"))
             _oem_frame.pack(fill="x", padx=2, pady=(0, 4))
@@ -7251,6 +7277,22 @@ class LangForgeApp:
                     pass
                 self.root.after(0, self._oem_ollama_ready)
             except Exception:
+                # 服務沒回應：若已找到 ollama 執行檔（剛裝好但服務未啟動），連續兩次後主動啟動
+                exe = _find_ollama_exe()
+                if exe:
+                    self._ollama_found_polls = getattr(self, "_ollama_found_polls", 0) + 1
+                    if self._ollama_found_polls >= 2 and not getattr(self, "_ollama_serve_started", False):
+                        self._ollama_serve_started = True
+                        try:
+                            if IS_MAC and os.path.isdir("/Applications/Ollama.app"):
+                                subprocess.Popen(["open", "-a", "Ollama"])
+                            else:
+                                subprocess.Popen([exe, "serve"], stdout=subprocess.DEVNULL,
+                                                 stderr=subprocess.DEVNULL, creationflags=_NO_WINDOW,
+                                                 env=_system_env())
+                            log(f"[OLLAMA] 已找到 {exe}，主動啟動服務")
+                        except Exception as e:
+                            log(f"[OLLAMA] 啟動服務失敗: {e}")
                 self.root.after(5000, self._oem_check_ollama_installed)
         threading.Thread(target=_check, daemon=True).start()
 
@@ -7281,7 +7323,7 @@ class LangForgeApp:
         def _pull():
             try:
                 result = subprocess.run(
-                    ["ollama", "pull", "gemma4:12b-it-qat"],
+                    [_find_ollama_exe() or "ollama", "pull", "gemma4:12b-it-qat"],
                     capture_output=True, text=True, timeout=3600,
                     creationflags=_NO_WINDOW, env=_system_env()
                 )
@@ -7312,7 +7354,7 @@ class LangForgeApp:
                 for m in data.get("models", []):
                     name = m.get("name", "")
                     if name:
-                        subprocess.run(["ollama", "stop", name],
+                        subprocess.run([_find_ollama_exe() or "ollama", "stop", name],
                                        timeout=10, capture_output=True,
                                        creationflags=_NO_WINDOW, env=_system_env())
                         log(f"[OLLAMA] 切換模型：已停止 {name}")
