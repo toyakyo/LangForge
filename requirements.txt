@@ -1,4 +1,4 @@
-# LangForge V1.5.15 依賴列表
+# LangForge V1.5.16 依賴列表
 # 一鍵安裝：pip install -r requirements.txt
 # （Linux 另需系統套件：sudo apt install python3-tk fonts-noto-cjk scrot）
 
