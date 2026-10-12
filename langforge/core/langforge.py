@@ -1,4 +1,4 @@
-"""LangForge V1.5.16
+"""LangForge V1.5.17
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -250,13 +250,13 @@ def _load_app_icon(window) -> None:
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.5.16"
+ABOUT_VERSION = "V1.5.17"
 DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
 ABOUT_LICENSE = "Copyright © 2026 GoOnSoft. All rights reserved."
 TUTORIAL_URL = "https://goonsoft.tw2.nde.tw/tutorial/tutorial.php"
-# 檢查更新：讀取此 JSON {"version": "V1.5.16", "url": "下載頁"}（僅提醒，不下載）
+# 檢查更新：讀取此 JSON {"version": "V1.5.17", "url": "下載頁"}（僅提醒，不下載）
 UPDATE_URL = "https://goonsoft.tw2.nde.tw/tutorial/version.json"
 
 # ==========================================
@@ -3110,15 +3110,15 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.5.16")
+        self.root.title("LangForge  V1.5.17")
         _days_left = _oem_license_days_left()
         if _days_left is not None:
             if _days_left < 0:
-                self.root.title("LangForge  V1.5.16  －  " + S("status_oem_expired").format(
+                self.root.title("LangForge  V1.5.17  －  " + S("status_oem_expired").format(
                     date=OEM_LICENSE_EXPIRY.replace("-", "/")))
                 log(f"[OEM] 授權評估期已於 {OEM_LICENSE_EXPIRY} 屆期")
             elif _days_left <= OEM_LICENSE_WARN_DAYS:
-                self.root.title("LangForge  V1.5.16  －  " + S("oem_countdown").format(days=_days_left))
+                self.root.title("LangForge  V1.5.17  －  " + S("oem_countdown").format(days=_days_left))
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
             else:
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
@@ -3219,7 +3219,7 @@ class LangForgeApp:
         frm = ttk.Frame(root, padding=8)
         frm.pack(fill="both", expand=True)
 
-        # ── OEM 版：右下角浮水印（直式OEM授權 LOGO 25% 透明）──
+        # ── OEM 版：右下角浮水印（直式 OEM授權 LOGO 25% 透明）──
         if IS_OEM:
             def _place_watermark():
                 try:

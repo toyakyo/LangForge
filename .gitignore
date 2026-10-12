@@ -45,3 +45,8 @@ Thumbs.db
 #Other
 fix_all_paths_for_single_exe.py
 git流程.txt
+
+# OEM 授權資產（不得上傳公開版本庫）
+langforge/core/logo.txt
+oem_icon.ico
+*.ico.oem
