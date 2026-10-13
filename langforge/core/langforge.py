@@ -1,4 +1,4 @@
-"""LangForge V1.5.17
+"""LangForge V1.5.18
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -248,15 +248,35 @@ def _load_app_icon(window) -> None:
 
 
 # ==========================================
+# 第三方授權聲明（third_party_licenses.txt）
+# ==========================================
+def _load_third_party_text():
+    """讀取 third_party_licenses.txt；找不到回傳 None。公開版 / OEM 版都必須提供。"""
+    _dirs = []
+    if IS_FROZEN:
+        _dirs += [d for d in (getattr(sys, "_MEIPASS", ""), os.path.dirname(sys.executable)) if d]
+    _dirs += [BASE_DIR, os.path.dirname(os.path.abspath(__file__))]
+    for _d in _dirs:
+        _path = os.path.join(_d, "third_party_licenses.txt")
+        try:
+            with open(_path, "r", encoding="utf-8", errors="replace") as _f:
+                return _f.read()
+        except OSError:
+            continue
+    log("[About] 找不到 third_party_licenses.txt：" + " / ".join(_dirs))
+    return None
+
+
+# ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.5.17"
+ABOUT_VERSION = "V1.5.18"
 DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
 ABOUT_LICENSE = "Copyright © 2026 GoOnSoft. All rights reserved."
 TUTORIAL_URL = "https://goonsoft.tw2.nde.tw/tutorial/tutorial.php"
-# 檢查更新：讀取此 JSON {"version": "V1.5.17", "url": "下載頁"}（僅提醒，不下載）
+# 檢查更新：讀取此 JSON {"version": "V1.5.18", "url": "下載頁"}（僅提醒，不下載）
 UPDATE_URL = "https://goonsoft.tw2.nde.tw/tutorial/version.json"
 
 # ==========================================
@@ -497,6 +517,9 @@ UI_STRINGS = {
         "menu_exit": "結束",
         "menu_check_update": "檢查更新",
         "btn_check_update": "檢查更新",
+        "btn_third_party": "第三方授權",
+        "title_third_party": "第三方授權聲明",
+        "third_party_missing": "找不到第三方授權聲明檔（third_party_licenses.txt）。",
         "update_available": "發現新版本 {new}（目前 {cur}）。\n\n是否開啟下載頁面？",
         "update_latest": "目前已是最新版本（{cur}）。",
         "update_failed": "目前無法連線到更新伺服器，請稍後再試。",
@@ -901,6 +924,9 @@ UI_STRINGS = {
         "menu_exit": "Exit",
         "menu_check_update": "Check for Updates",
         "btn_check_update": "Check for Updates",
+        "btn_third_party": "Third-Party Licenses",
+        "title_third_party": "Third-Party Notices",
+        "third_party_missing": "Third-party license notice file (third_party_licenses.txt) not found.",
         "update_available": "New version {new} is available (current {cur}).\n\nOpen the download page?",
         "update_latest": "You are up to date ({cur}).",
         "update_failed": "Unable to connect to the update server right now. Please try again later.",
@@ -3110,15 +3136,15 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.5.17")
+        self.root.title("LangForge  V1.5.18")
         _days_left = _oem_license_days_left()
         if _days_left is not None:
             if _days_left < 0:
-                self.root.title("LangForge  V1.5.17  －  " + S("status_oem_expired").format(
+                self.root.title("LangForge  V1.5.18  －  " + S("status_oem_expired").format(
                     date=OEM_LICENSE_EXPIRY.replace("-", "/")))
                 log(f"[OEM] 授權評估期已於 {OEM_LICENSE_EXPIRY} 屆期")
             elif _days_left <= OEM_LICENSE_WARN_DAYS:
-                self.root.title("LangForge  V1.5.17  －  " + S("oem_countdown").format(days=_days_left))
+                self.root.title("LangForge  V1.5.18  －  " + S("oem_countdown").format(days=_days_left))
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
             else:
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
@@ -5553,7 +5579,46 @@ class LangForgeApp:
         if not IS_OEM:
             ttk.Button(btn_row, text=S("btn_check_update"),
                        command=lambda: self._check_update(win)).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_row, text=S("btn_third_party"),
+                   command=lambda: self._show_third_party(win)).pack(side="left", padx=(0, 8))
         ttk.Button(btn_row, text=S("btn_ok"), command=win.destroy, width=10).pack(side="left")
+
+    def _show_third_party(self, parent):
+        """以可捲動的唯讀文字視窗顯示第三方授權聲明。"""
+        text = _load_third_party_text()
+        if text is None:
+            messagebox.showwarning(S("title_third_party"), S("third_party_missing"), parent=parent)
+            return
+        win = tk.Toplevel(parent)
+        win.title(S("title_third_party"))
+        _load_app_icon(win)
+        win.transient(parent)
+        w, h = 760, 560
+        mx = parent.winfo_x() + (parent.winfo_width() - w) // 2
+        my = parent.winfo_y() + (parent.winfo_height() - h) // 2
+        win.geometry(f"{w}x{h}+{max(mx, 0)}+{max(my, 0)}")
+        bot = ttk.Frame(win)
+        bot.pack(side="bottom", fill="x", padx=8, pady=8)
+
+        def _close():
+            win.destroy()
+            try:
+                parent.grab_set()  # 還給「關於」視窗的互動鎖定
+            except tk.TclError:
+                pass
+
+        ttk.Button(bot, text=S("btn_close"), command=_close, width=10).pack(side="right")
+        body = ttk.Frame(win)
+        body.pack(side="top", fill="both", expand=True, padx=8, pady=(8, 0))
+        sb = ttk.Scrollbar(body, orient="vertical")
+        sb.pack(side="right", fill="y")
+        txt = tk.Text(body, wrap="word", font="TkFixedFont", yscrollcommand=sb.set)
+        txt.pack(side="left", fill="both", expand=True)
+        sb.config(command=txt.yview)
+        txt.insert("1.0", text)
+        txt.config(state="disabled")
+        win.protocol("WM_DELETE_WINDOW", _close)
+        win.grab_set()
 
     def _check_update(self, parent=None):
         """僅提醒：背景讀 UPDATE_URL，與 ABOUT_VERSION 逐段數字比較，結果由主執行緒顯示。"""

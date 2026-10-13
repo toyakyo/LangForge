@@ -49,6 +49,7 @@ jobs:
             --add-data="langforge/asset:langforge/asset" \
             --add-data="langforge/core:langforge/core" \
             --add-data="favicon.ico:." \
+            --add-data="third_party_licenses.txt:." \
             --collect-all=mistralai \
             --collect-all=google \
             --collect-all=anthropic \
