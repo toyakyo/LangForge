@@ -1,11 +1,11 @@
 # 🎮 LangForge
 
-**AI-Powered Game Screenshot Translation Tool for Windows**
+**AI-Powered Game Screenshot Translation Tool for Windows (Linux / macOS experimental)**
 
 Capture your game screen · AI translates the text · Result overlays directly on the image  
 Play any foreign-language game. Read everything. No interruptions.
 
-[![Version](https://img.shields.io/badge/Version-V1.5.1-blue?style=flat-square)](https://github.com/toyakyo/LangForge/releases) [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D6?style=flat-square&logo=windows)](https://github.com/toyakyo/LangForge) [![Open Source](https://img.shields.io/badge/Open%20Source-GitHub-333?style=flat-square&logo=github)](https://github.com/toyakyo/LangForge) [![Ko-fi](https://img.shields.io/badge/Support-Ko--fi-ff5f5f?style=flat-square&logo=ko-fi)](https://ko-fi.com/toyakyo) [![Patreon](https://img.shields.io/badge/Support-Patreon-orange?style=flat-square&logo=patreon)](https://www.patreon.com/cw/LangForge)
+[![Version](https://img.shields.io/badge/Version-V1.5.18-blue?style=flat-square)](https://github.com/toyakyo/LangForge/releases) [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-0078D6?style=flat-square&logo=windows)](https://github.com/toyakyo/LangForge) [![Open Source](https://img.shields.io/badge/Open%20Source-GitHub-333?style=flat-square&logo=github)](https://github.com/toyakyo/LangForge) [![Ko-fi](https://img.shields.io/badge/Support-Ko--fi-ff5f5f?style=flat-square&logo=ko-fi)](https://ko-fi.com/toyakyo) [![Patreon](https://img.shields.io/badge/Support-Patreon-orange?style=flat-square&logo=patreon)](https://www.patreon.com/cw/LangForge)
 
 [📥 Download](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php#download) • [📖 Documentation](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php) • [💬 Community](https://www.facebook.com/groups/2150940378645437) • [☕ Ko-fi](https://ko-fi.com/toyakyo) • [💜 Patreon](https://www.patreon.com/cw/LangForge)
 
@@ -13,7 +13,7 @@ Play any foreign-language game. Read everything. No interruptions.
 
 ## 🌟 What is LangForge?
 
-LangForge is an open-source AI-assisted game translation tool for Windows. It automatically detects your game window, captures the screen, and translates on-screen foreign text using your choice of AI engine — overlaying the result directly on the screenshot, positioned where the original text was.
+LangForge is an open-source AI-assisted game translation tool for Windows (with experimental Linux and macOS builds). It automatically detects your game window, captures the screen, and translates on-screen foreign text using your choice of AI engine — overlaying the result directly on the screenshot, positioned where the original text was.
 
 Designed for players who want to enjoy Japanese, Korean, or any foreign-language game without switching windows or pausing to look things up.
 
@@ -81,6 +81,15 @@ LangForge automatically rotates engines when a free quota runs out — keeping t
 
 > **New in V1.5:** Use **Simple Mode (Tab 7)** for a streamlined OLLAMA experience — no API key, minimal setup.
 
+### Option C — Linux / macOS (Experimental)
+
+1. Download the Linux (Ubuntu 22.04+, X11) or macOS (Apple Silicon) archive from the [download page](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php#download)
+2. Extract it: `tar -xzf LangForge_<version>_<linux|macos>.tar.gz`
+3. Linux: `sudo apt install fonts-noto-cjk`, then `chmod +x LangForge && ./LangForge`
+4. macOS: `xattr -cr LangForge && chmod +x LangForge && ./LangForge`, and allow **Screen Recording** for your terminal in System Settings
+
+> Experimental builds capture the **whole primary screen** (no window-title capture and no global hotkeys). Cloud engines and OLLAMA work as on Windows. See the [tutorial](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php#unix) for details.
+
 ### Option D — Running from Source
 
 ```bash
@@ -130,6 +139,7 @@ The application makes **only the API calls required for translation** — to the
 
 | Release | File | SHA256 |
 | --- | --- | --- |
+| V1.5.18 (Windows) | `LangForge.exe` | `0EEF1F73CF69909E17DE876AAA235D5A3CFB6CA5091482FECA10278E7DABDB0D` |
 | V1.5.1 | `LangForge.exe` | `EFE1E645BF88CB359B0D48BD4E29DDDABF157FABCC433D3AF5C359B123B6B793` |
 | V1.5 | `LangForge.exe` | `AC62B71FADE75FD6E06DFA228E9E2E1759ACD65252E14A9A80BD52BB96FEA083` |
 | V1.1.1 | `LangForge.exe` | `1E9DF0E89E91E9D799E56049E7F5FBA5D08C36E6706F4140F38E38413697FE80` |
@@ -139,7 +149,13 @@ The application makes **only the API calls required for translation** — to the
 Get-FileHash .\LangForge.exe -Algorithm SHA256
 ```
 
-> If the hash does not match, do **not** run the file. Re-download from the official page.
+> If the hash does not match, do **not** run the file. Re-download from the official page. SHA256 values for the Linux / macOS archives are listed on the download page.
+
+---
+
+## 📜 Third-Party Licenses
+
+LangForge is proprietary software and bundles third-party open-source components (MIT, BSD, Apache-2.0, PSF, MPL-2.0 and others). Their copyright notices and license texts are in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) and are also available in the app: **Help → About → Third-Party Licenses**.
 
 ---
 

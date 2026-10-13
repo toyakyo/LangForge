@@ -4,7 +4,7 @@
 
 > 📖 [English README](https://github.com/toyakyo/LangForge/blob/master/README.md)
 
-[![Version](https://img.shields.io/badge/版本-V1.5.1-blue?style=flat-square)](https://github.com/toyakyo/LangForge/releases) [![Platform](https://img.shields.io/badge/平台-Windows%2010%2F11-0078D6?style=flat-square&logo=windows)](https://github.com/toyakyo/LangForge) [![Open Source](https://img.shields.io/badge/開源-GitHub-333?style=flat-square&logo=github)](https://github.com/toyakyo/LangForge)
+[![Version](https://img.shields.io/badge/版本-V1.5.18-blue?style=flat-square)](https://github.com/toyakyo/LangForge/releases) [![Platform](https://img.shields.io/badge/平台-Windows%20%7C%20Linux%20%7C%20macOS-0078D6?style=flat-square&logo=windows)](https://github.com/toyakyo/LangForge) [![Open Source](https://img.shields.io/badge/開源-GitHub-333?style=flat-square&logo=github)](https://github.com/toyakyo/LangForge)
 
 [📥 下載](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php#download) • [📖 完整教學](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php) • [💬 社群](https://www.facebook.com/groups/2150940378645437) • [☕ Ko-fi](https://ko-fi.com/toyakyo) • [💜 Patreon](https://www.patreon.com/cw/LangForge)
 
@@ -32,12 +32,12 @@
 
 ### 方式一：下載執行檔（推薦）
 
-1. 從 [GitHub Releases](https://github.com/toyakyo/LangForge/releases) 下載 `LangForge_V1.5.1.zip`
+1. 從[下載頁面](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php#download)下載最新版 `LangForge_V1.5.18.zip`
 2. 解壓縮後直接執行 `LangForge.exe`（無需安裝 Python）
 3. 建議執行前驗證 SHA256：
 
 ```
-EFE1E645BF88CB359B0D48BD4E29DDDABF157FABCC433D3AF5C359B123B6B793
+0EEF1F73CF69909E17DE876AAA235D5A3CFB6CA5091482FECA10278E7DABDB0D
 ```
 
 ```powershell
@@ -45,6 +45,15 @@ Get-FileHash .\LangForge.exe -Algorithm SHA256
 ```
 
 > 若雜湊值不符，請勿執行，並從官方頁面重新下載。
+
+### Linux / macOS（實驗版）
+
+1. 從[下載頁面](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php#download)下載 Linux（Ubuntu 22.04 以上，X11）或 macOS（Apple Silicon）版壓縮檔，兩者的 SHA256 都列在下載頁
+2. 解壓縮：`tar -xzf LangForge_<版本>_<linux|macos>.tar.gz`
+3. Linux：先 `sudo apt install fonts-noto-cjk`，再 `chmod +x LangForge && ./LangForge`
+4. macOS：`xattr -cr LangForge && chmod +x LangForge && ./LangForge`，並在系統設定允許終端機的「螢幕錄製」
+
+> 實驗版擷取**整個主螢幕**，不支援依視窗標題擷取與全域快捷鍵；雲端引擎與 OLLAMA 可正常使用。詳見[完整教學](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php#unix)。
 
 ### 方式二：從原始碼執行
 
@@ -113,6 +122,10 @@ python LangForge.py
 
 | 版本 | 日期 | 重點 |
 | --- | --- | --- |
+| V1.5.18 | 2026-10-13 | 新增「關於 → 第三方授權」聲明；移除 chardet（LGPL）相依 |
+| V1.5.17 | 2026-10-12 | 公開版不再附帶 OEM 授權相關資源檔 |
+| V1.5.16 | 2026-10-09 | 移除本地 OCR 模式（EXE 約 205 MB → 約 49 MB）、修正 OLLAMA 安裝流程 |
+| V1.5.15 | 2026-10-09 | Linux（Ubuntu）/ macOS 實驗版首次發布 |
 | V1.5.1 | 2026-07-14 | 簡易模式自動擷取 3 秒最小間隔、一鍵切換模式按鈕、RPM 修正 |
 | V1.5 | 2026-07-06 | 引擎擴增至 10 組、新增簡易模式（Tab 7） |
 | V1.1.1 | 2026-05-07 | 疊字顯示設定、自動備援設定、遊戲名稱重新命名 |
@@ -131,6 +144,10 @@ https://goonsoft.tw2.nde.tw/tutorial/tutorial.php
 ## 授權
 
 Copyright © 2026 GoOnSoft. All rights reserved.
+
+### 第三方授權
+
+LangForge 為專有軟體，內含第三方開源元件（MIT、BSD、Apache-2.0、PSF、MPL-2.0 等）。其著作權聲明與授權全文請見 [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)，程式內亦可從「說明 → 關於 → 第三方授權」開啟。
 
 ---
 
