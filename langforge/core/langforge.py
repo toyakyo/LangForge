@@ -56,7 +56,8 @@ IS_OEM = False   # OEM 版旗標：True=OEM授權版，False=公開版
 OEM_ICON_NAME = "oem_icon.ico"  # OEM 版圖示檔名；spec 的 datas 與 icon= 需用同一個檔
 # ── OEM 評估期限制（僅 IS_OEM=True 生效）──
 # 屆期後停止呼叫 OLLAMA。解除方式只有一種：改下面的日期或關閉 IS_OEM，然後重新打包。
-OEM_LICENSE_EXPIRY = "2027-01-01"   # 當地時間該日零時起失效
+OEM_LICENSE_EXPIRY = "2027-01-01"   # 當地時間該日零時起失效；空字串=無評估期限制
+OEM_WRITE_LOG = False               # 僅 IS_OEM 凍結版：True 才寫 langforge.log。正式交付 False；到客戶電腦測試時才改 True
 OEM_LICENSE_WARN_DAYS = 10          # 屆期前幾天開始在標題列顯示倒數
 
 
@@ -64,7 +65,7 @@ def _oem_license_days_left():
     """回傳距離評估期屆期的天數。IS_OEM=False 或日期無法解析時回傳 None。
     0 = 今天是最後一天；負數 = 已屆期。
     """
-    if not IS_OEM:
+    if not IS_OEM or not OEM_LICENSE_EXPIRY:
         return None
     try:
         from datetime import datetime
@@ -1489,7 +1490,7 @@ for models in ENGINE_MODELS.values():
 
 
 _LOG_FILE = os.path.join(os.path.dirname(sys.executable if IS_FROZEN else __file__), "langforge.log")
-_log_fh = open(_LOG_FILE, "a", encoding="utf-8", buffering=1) if (IS_FROZEN and IS_OEM) else None  # 公開版不寫 log 檔
+_log_fh = open(_LOG_FILE, "a", encoding="utf-8", buffering=1) if (IS_FROZEN and IS_OEM and OEM_WRITE_LOG) else None  # 公開版不寫 log 檔；OEM 正式交付也不寫
 
 
 def log(msg):

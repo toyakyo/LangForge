@@ -50,3 +50,6 @@ git流程.txt
 langforge/core/logo.txt
 oem_icon.ico
 *.ico.oem
+
+# Visual Studio 暫存
+.vs/
