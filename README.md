@@ -5,7 +5,7 @@
 Capture your game screen · AI translates the text · Result overlays directly on the image  
 Play any foreign-language game. Read everything. No interruptions.
 
-[![Version](https://img.shields.io/badge/Version-V1.5.18-blue?style=flat-square)](https://github.com/toyakyo/LangForge/releases) [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-0078D6?style=flat-square&logo=windows)](https://github.com/toyakyo/LangForge) [![Open Source](https://img.shields.io/badge/Open%20Source-GitHub-333?style=flat-square&logo=github)](https://github.com/toyakyo/LangForge) [![Ko-fi](https://img.shields.io/badge/Support-Ko--fi-ff5f5f?style=flat-square&logo=ko-fi)](https://ko-fi.com/toyakyo) [![Patreon](https://img.shields.io/badge/Support-Patreon-orange?style=flat-square&logo=patreon)](https://www.patreon.com/cw/LangForge)
+[![Version](https://img.shields.io/badge/Version-V1.5.19-blue?style=flat-square)](https://github.com/toyakyo/LangForge/releases) [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-0078D6?style=flat-square&logo=windows)](https://github.com/toyakyo/LangForge) [![Open Source](https://img.shields.io/badge/Open%20Source-GitHub-333?style=flat-square&logo=github)](https://github.com/toyakyo/LangForge) [![Ko-fi](https://img.shields.io/badge/Support-Ko--fi-ff5f5f?style=flat-square&logo=ko-fi)](https://ko-fi.com/toyakyo) [![Patreon](https://img.shields.io/badge/Support-Patreon-orange?style=flat-square&logo=patreon)](https://www.patreon.com/cw/LangForge)
 
 [📥 Download](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php#download) • [📖 Documentation](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php) • [💬 Community](https://www.facebook.com/groups/2150940378645437) • [☕ Ko-fi](https://ko-fi.com/toyakyo) • [💜 Patreon](https://www.patreon.com/cw/LangForge)
 
@@ -78,6 +78,8 @@ LangForge automatically rotates engines when a free quota runs out — keeping t
 2. Run `ollama pull llava` to download a vision model
 3. Start with `ollama serve`
 4. In LangForge, select **🦙 Local Engine (OLLAMA)**
+
+> **New in V1.5.19:** The in-app **Install OLLAMA** and **Download Default Model** buttons now show what will be installed/downloaded and ask for confirmation first, show the real `ollama pull` progress, verify the model with OLLAMA when finished, and report errors (network, disk space, OLLAMA not running) clearly. OLLAMA and the models are third-party software/content with their own terms; model files are downloaded by OLLAMA, not by LangForge.
 
 > **New in V1.5:** Use **Simple Mode (Tab 7)** for a streamlined OLLAMA experience — no API key, minimal setup.
 

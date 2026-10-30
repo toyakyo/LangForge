@@ -1,4 +1,4 @@
-"""LangForge V1.5.18
+"""LangForge V1.5.19
 AI-powered game screenshot translation tool.
 
 Copyright (c) 2026 Toya Kyo (GoOnSoft)
@@ -56,7 +56,7 @@ IS_OEM = False   # OEM 版旗標：True=OEM授權版，False=公開版
 OEM_ICON_NAME = "oem_icon.ico"  # OEM 版圖示檔名；spec 的 datas 與 icon= 需用同一個檔
 # ── OEM 評估期限制（僅 IS_OEM=True 生效）──
 # 屆期後停止呼叫 OLLAMA。解除方式只有一種：改下面的日期或關閉 IS_OEM，然後重新打包。
-OEM_LICENSE_EXPIRY = "2027-01-01"   # 當地時間該日零時起失效；空字串=無評估期限制
+OEM_LICENSE_EXPIRY = ""   # 格式 "YYYY-MM-DD"，當地時間該日零時起失效；空字串=無評估期限制（目前關閉，授權其他家時可再開啟）
 OEM_WRITE_LOG = False               # 僅 IS_OEM 凍結版：True 才寫 langforge.log。正式交付 False；到客戶電腦測試時才改 True
 OEM_LICENSE_WARN_DAYS = 10          # 屆期前幾天開始在標題列顯示倒數
 
@@ -271,13 +271,17 @@ def _load_third_party_text():
 # ==========================================
 # 關於資訊常數
 # ==========================================
-ABOUT_VERSION = "V1.5.18"
+ABOUT_VERSION = "V1.5.19"
+
+# 「下載預設模型」實際執行的 ollama pull 目標；告知視窗與下載流程都讀這一個值，避免文字與行為不一致
+# 公開版 gemma4:12b-it-qat；OEM 版 qwen2.5vl:7b（OLLAMA 官方 tag 無 dash，寫成 qwen2.5-vl 會 pull 失敗）
+OLLAMA_DEFAULT_MODEL = "qwen2.5vl:7b" if IS_OEM else "gemma4:12b-it-qat"
 DEBUG_COORD = False  # True = 輸出座標診斷 log（開發用，發布前設為 False）
 ABOUT_GITHUB = "https://github.com/toyakyo"
 ABOUT_AUTHOR = "Toya Kyo"
 ABOUT_LICENSE = "Copyright © 2026 GoOnSoft. All rights reserved."
 TUTORIAL_URL = "https://goonsoft.tw2.nde.tw/tutorial/tutorial.php"
-# 檢查更新：讀取此 JSON {"version": "V1.5.18", "url": "下載頁"}（僅提醒，不下載）
+# 檢查更新：讀取此 JSON {"version": "V1.5.19", "url": "下載頁"}（僅提醒，不下載）
 UPDATE_URL = "https://goonsoft.tw2.nde.tw/tutorial/version.json"
 
 # ==========================================
@@ -436,8 +440,51 @@ UI_STRINGS = {
         "btn_oem_pull_gemma": "下載預設模型",
         "status_oem_checking": "等待 OLLAMA 安裝完成，自動偵測中...",
         "status_oem_ollama_ready": "OLLAMA 已就緒，可以下載模型",
-        "status_oem_pulling": "下載 gemma4:12b-it-qat（約 7.2GB），請耐心等候...",
-        "status_oem_pull_done": "gemma4:12b-it-qat 下載完成！",
+        "status_oem_already_installed": "已偵測到 OLLAMA 安裝，正在啟動，請稍候...",
+        "status_oem_pulling": "正在下載 {model}，請耐心等候...",
+        "status_oem_pull_done": "{model} 下載完成！",
+        # ── OLLAMA 安裝 / 模型下載告知（UDP-0007）──
+        "btn_continue_install": "繼續安裝",
+        "btn_start_download": "開始下載",
+        "btn_start_use": "開始使用",
+        "title_ollama_install": "安裝 OLLAMA",
+        "msg_ollama_install": (
+            "LangForge 使用 OLLAMA 作為本地 AI 模型的執行環境。\n\n"
+            "安裝 OLLAMA 後，您可以在本機執行 AI 模型，不必透過 LangForge 的雲端 AI 服務。\n\n"
+            "安裝過程需要網路連線，並由 OLLAMA 官方來源取得安裝程式。\n\n"
+            "請注意：\n"
+            "• OLLAMA 為第三方軟體，具有自己的使用條款及更新機制。\n"
+            "• 安裝及執行需求依 OLLAMA 官方規格為準。\n"
+            "• 安裝完成後，LangForge 將使用 OLLAMA 提供的本地模型服務。"),
+        "title_model_pull": "下載推薦 AI 模型",
+        "msg_model_pull": (
+            "LangForge 推薦的本地 AI 模型如下：\n\n"
+            "模型識別名稱：{model}\n"
+            "執行環境：OLLAMA\n"
+            "下載方式：由 LangForge 呼叫 OLLAMA CLI 執行下載（模型檔案由 OLLAMA 取得，非 LangForge 直接下載）\n\n"
+            "下載前請注意：\n"
+            "• 下載模型需要網路連線。\n"
+            "• 模型檔案會占用本機儲存空間。\n"
+            "• 模型執行效能會受到 CPU、GPU、VRAM 及 RAM 等硬體條件影響。\n"
+            "• 模型輸出內容可能存在錯誤，重要資訊請自行查證。\n"
+            "• 模型本身及其使用方式應遵循適用的授權條款。\n\n"
+            "確認後將執行：\n{cmd}"),
+        "title_pull_progress": "下載模型",
+        "pull_st_connect": "正在連接 OLLAMA...",
+        "pull_st_downloading": "正在下載模型...",
+        "pull_st_verifying": "正在取得模型資料...",
+        "pull_st_verify_check": "正在確認 OLLAMA 是否辨識模型...",
+        "pull_st_done": "模型下載完成。",
+        "pull_st_failed": "模型下載失敗。",
+        "title_pull_done": "模型下載完成",
+        "msg_pull_done": "推薦模型已成功下載至本機 OLLAMA 環境，且 OLLAMA 已能辨識。\n\n您現在可以使用 LangForge 開始執行本地 AI 模型。",
+        "title_pull_error": "模型下載未完成",
+        "err_ollama_down": "無法連接 OLLAMA，請確認 OLLAMA 是否正常執行。",
+        "err_network": "無法連接模型下載來源，請檢查網路連線後重試。",
+        "err_disk_full": "本機可用儲存空間不足，請釋放空間後重試。",
+        "err_pull_failed": "模型下載未完成，請檢查錯誤資訊後重試。",
+        "err_model_unrecognized": "OLLAMA 未能辨識已下載的模型，請重新確認模型安裝狀態。",
+        "lbl_tech_detail": "技術資訊：",
         "btn_query_device": "查詢裝置",
         "lbl_device_unknown": "未載入",
         "status_ready": "狀態: 就緒",
@@ -843,8 +890,51 @@ UI_STRINGS = {
         "btn_oem_pull_gemma": "Download Default Model",
         "status_oem_checking": "Waiting for OLLAMA installation, auto-detecting...",
         "status_oem_ollama_ready": "OLLAMA ready. You can now download the model.",
-        "status_oem_pulling": "Downloading gemma4:12b-it-qat (~7.2GB), please wait...",
-        "status_oem_pull_done": "gemma4:12b-it-qat downloaded successfully!",
+        "status_oem_already_installed": "OLLAMA is already installed; starting it, please wait...",
+        "status_oem_pulling": "Downloading {model}, please wait...",
+        "status_oem_pull_done": "{model} downloaded successfully!",
+        # ── OLLAMA install / model download notices (UDP-0007) ──
+        "btn_continue_install": "Continue",
+        "btn_start_download": "Start Download",
+        "btn_start_use": "Get Started",
+        "title_ollama_install": "Install OLLAMA",
+        "msg_ollama_install": (
+            "LangForge uses OLLAMA as the runtime for local AI models.\n\n"
+            "After installing OLLAMA you can run AI models on this computer instead of using LangForge's cloud AI services.\n\n"
+            "Installation requires an internet connection; the installer is obtained from OLLAMA's official source.\n\n"
+            "Please note:\n"
+            "• OLLAMA is third-party software with its own terms of use and update mechanism.\n"
+            "• Installation and system requirements follow OLLAMA's official specifications.\n"
+            "• Once installed, LangForge will use the local model service provided by OLLAMA."),
+        "title_model_pull": "Download Recommended AI Model",
+        "msg_model_pull": (
+            "The local AI model recommended by LangForge:\n\n"
+            "Model identifier: {model}\n"
+            "Runtime: OLLAMA\n"
+            "Method: LangForge invokes the OLLAMA CLI to perform the download (model files are fetched by OLLAMA, not downloaded directly by LangForge)\n\n"
+            "Before downloading, please note:\n"
+            "• Downloading requires an internet connection.\n"
+            "• Model files take up local storage space.\n"
+            "• Performance depends on hardware such as CPU, GPU, VRAM and RAM.\n"
+            "• Model output may contain errors; verify important information yourself.\n"
+            "• The model and its use are subject to the applicable license terms.\n\n"
+            "After you confirm, this will run:\n{cmd}"),
+        "title_pull_progress": "Downloading Model",
+        "pull_st_connect": "Connecting to OLLAMA...",
+        "pull_st_downloading": "Downloading model...",
+        "pull_st_verifying": "Fetching model data...",
+        "pull_st_verify_check": "Checking that OLLAMA recognizes the model...",
+        "pull_st_done": "Model download complete.",
+        "pull_st_failed": "Model download failed.",
+        "title_pull_done": "Model Downloaded",
+        "msg_pull_done": "The recommended model has been downloaded to your local OLLAMA and OLLAMA recognizes it.\n\nYou can now run local AI models with LangForge.",
+        "title_pull_error": "Model Download Incomplete",
+        "err_ollama_down": "Cannot connect to OLLAMA. Please make sure OLLAMA is running.",
+        "err_network": "Cannot reach the model download source. Please check your network connection and retry.",
+        "err_disk_full": "Not enough free disk space. Please free up space and retry.",
+        "err_pull_failed": "The model download did not complete. Please check the error details and retry.",
+        "err_model_unrecognized": "OLLAMA does not recognize the downloaded model. Please re-check the model installation.",
+        "lbl_tech_detail": "Technical details:",
         "btn_query_device": "Query Device",
         "lbl_device_unknown": "Not loaded",
         "status_ready": "Status: Ready",
@@ -2374,6 +2464,98 @@ def _system_env() -> dict:
     return env
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+class _TermBuf:
+    """極簡終端機畫面：ollama pull 在管線輸出時仍用 ANSI 控制碼（游標上移 / 回到行首 / 清除行尾）
+    重畫多行進度，必須依游標位置覆寫，不能把每次重畫都當成新的一行。"""
+
+    def __init__(self):
+        self.rows = [[]]
+        self.r = 0
+        self.c = 0
+        self._esc = None  # None=一般字元；""=剛收到 ESC；"[..."=CSI 參數收集中
+
+    def _grow(self):
+        while len(self.rows) <= self.r:
+            self.rows.append([])
+
+    def _apply(self, params, final):
+        digits = params.lstrip("[").split(";")[0]
+        n = int(digits) if digits.isdigit() else 1
+        if final == "A":
+            self.r = max(0, self.r - n)
+        elif final == "B":
+            self.r += n
+            self._grow()
+        elif final == "G":
+            self.c = max(0, n - 1)
+        elif final == "K":
+            del self.rows[self.r][self.c:]
+        elif final == "J":
+            del self.rows[self.r][self.c:]
+            del self.rows[self.r + 1:]
+
+    def feed(self, text):
+        for ch in text:
+            if ch == "\x1b":
+                self._esc = ""
+            elif self._esc is not None:
+                if self._esc == "" and ch != "[":
+                    self._esc = None
+                elif "@" <= ch <= "~" and self._esc != "":
+                    self._apply(self._esc, ch)
+                    self._esc = None
+                else:
+                    self._esc += ch
+            elif ch == "\r":
+                self.c = 0
+            elif ch == "\n":
+                self.r += 1
+                self.c = 0
+                self._grow()
+            elif ch >= " ":
+                self._grow()
+                row = self.rows[self.r]
+                if len(row) < self.c:
+                    row.extend(" " * (self.c - len(row)))
+                if self.c < len(row):
+                    row[self.c] = ch
+                else:
+                    row.append(ch)
+                self.c += 1
+
+    def lines(self):
+        return ["".join(row).rstrip() for row in self.rows]
+
+
+def _classify_pull_error(output: str) -> str:
+    """依 ollama pull 實際輸出判斷失敗類別，回傳 UI_STRINGS 的 err_* key。"""
+    t = (output or "").lower()
+    if "no space left" in t or "disk full" in t or "not enough space" in t or "insufficient" in t and "space" in t:
+        return "err_disk_full"
+    if ("connection refused" in t or "could not connect to ollama" in t
+            or "server not responding" in t or "ollama serve" in t):
+        return "err_ollama_down"
+    if ("no such host" in t or "dial tcp" in t or "timeout" in t or "timed out" in t
+            or "tls" in t or "unexpected eof" in t or "network is unreachable" in t
+            or "connection reset" in t or "i/o timeout" in t):
+        return "err_network"
+    return "err_pull_failed"
+
+
+def _ollama_has_model(name: str) -> bool:
+    """向 OLLAMA 服務確認模型是否已存在（/api/tags）。"""
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_BASE_URL}/api/tags", timeout=5) as r:
+            models = json.loads(r.read().decode()).get("models", [])
+        base = name if ":" in name else name + ":latest"
+        return any(m.get("name") in (name, base) or m.get("model") in (name, base) for m in models)
+    except Exception:
+        return False
+
+
 def _detect_ollama_num_predict() -> int:
     """WMI 偵測 GPU 廠牌，決定手動覆蓋要套用 CUDA 還是非 CUDA 那組。
     num_predict 兩邊都是 4096：OLLAMA 預設 num_ctx 為 4096，
@@ -3137,18 +3319,20 @@ def _fetch_models_from_api(eng: str, api_key: str) -> list:
 class LangForgeApp:
     def __init__(self, root, splash=None):
         self.root = root
-        self.root.title("LangForge  V1.5.18")
+        self.root.title("LangForge  V1.5.19")
         _days_left = _oem_license_days_left()
         if _days_left is not None:
             if _days_left < 0:
-                self.root.title("LangForge  V1.5.18  －  " + S("status_oem_expired").format(
+                self.root.title("LangForge  V1.5.19  －  " + S("status_oem_expired").format(
                     date=OEM_LICENSE_EXPIRY.replace("-", "/")))
                 log(f"[OEM] 授權評估期已於 {OEM_LICENSE_EXPIRY} 屆期")
             elif _days_left <= OEM_LICENSE_WARN_DAYS:
-                self.root.title("LangForge  V1.5.18  －  " + S("oem_countdown").format(days=_days_left))
+                self.root.title("LangForge  V1.5.19  －  " + S("oem_countdown").format(days=_days_left))
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
             else:
                 log(f"[OEM] 授權評估期剩餘 {_days_left} 天（{OEM_LICENSE_EXPIRY} 屆期）")
+        elif IS_OEM:
+            log("[OEM] 授權評估期限制 (此功能已關閉)")
         if IS_OEM and _OEM_LOGO_STATUS:
             log(f"[OEM] {_OEM_LOGO_STATUS}")
         _load_app_icon(self.root)
@@ -7304,16 +7488,65 @@ class LangForgeApp:
         )
         log(f"[OLLAMA] 重新偵測完成，找到 {count} 個模型")
 
+    def _notice_dialog(self, title, body, ok_text, cancel_text=None):
+        """模態告知視窗；回傳 True＝按下 ok_text。cancel_text=None 時只有一顆按鈕。"""
+        win = tk.Toplevel(self.root)
+        win.title(title)
+        _load_app_icon(win)
+        win.transient(self.root)
+        win.resizable(False, False)
+        result = {"ok": False}
+
+        def _ok():
+            result["ok"] = True
+            win.destroy()
+
+        ttk.Label(win, text=body, justify="left", wraplength=480).pack(padx=20, pady=(16, 8), anchor="w")
+        bot = ttk.Frame(win)
+        bot.pack(pady=(4, 14))
+        ttk.Button(bot, text=ok_text, command=_ok).pack(side="left", padx=6)
+        if cancel_text:
+            ttk.Button(bot, text=cancel_text, command=win.destroy).pack(side="left", padx=6)
+        win.update_idletasks()
+        mx = self.root.winfo_x() + (self.root.winfo_width() - win.winfo_width()) // 2
+        my = self.root.winfo_y() + (self.root.winfo_height() - win.winfo_height()) // 2
+        win.geometry(f"+{max(mx, 0)}+{max(my, 0)}")
+        win.grab_set()
+        self.root.wait_window(win)
+        return result["ok"]
+
     def _oem_install_ollama(self):
+        """安裝前先顯示說明並取得使用者確認，確認後才進入原有安裝流程。"""
+        if not self._notice_dialog(S("title_ollama_install"), S("msg_ollama_install"),
+                                   S("btn_continue_install"), S("btn_cancel")):
+            log("[OLLAMA] 使用者取消安裝")
+            return
+        self._do_install_ollama()
+
+    def _do_install_ollama(self):
         """安裝 OLLAMA 並開始輪詢偵測完成。
         Windows：PowerShell 腳本；macOS：開啟官方下載頁（安裝 .app）；
         Linux：在終端機執行官方 install.sh（需 sudo 密碼），找不到終端機則開下載頁。
         """
+        # 已安裝（找得到執行檔）：不重跑安裝，只啟動 OLLAMA（Windows 含托盤程式）並等待就緒
+        _exe = _find_ollama_exe()
+        if _exe:
+            log(f"[OLLAMA] 已安裝於 {_exe}，略過安裝，改為啟動")
+            self._ollama_serve_started = False
+            self._ollama_found_polls = 0
+            self._start_ollama_service(_exe)
+            self._ollama_serve_started = True
+            self._set_status(S("status_oem_already_installed"), "blue")
+            self._oem_check_ollama_installed()
+            return
         try:
             if IS_WIN:
+                # 失敗時保留視窗並顯示紅字錯誤，成功則自動關閉（安裝命令本身不變）
                 subprocess.Popen(
                     ["powershell", "-ExecutionPolicy", "Bypass", "-Command",
-                     "irm https://ollama.com/install.ps1 | iex"],
+                     "try { irm https://ollama.com/install.ps1 | iex } catch { "
+                     "Write-Host ''; Write-Host $_ -ForegroundColor Red; "
+                     "Read-Host 'Install failed. Press Enter to close' | Out-Null }"],
                     creationflags=subprocess.CREATE_NEW_CONSOLE
                 )
             elif IS_MAC:
@@ -7349,18 +7582,40 @@ class LangForgeApp:
                     self._ollama_found_polls = getattr(self, "_ollama_found_polls", 0) + 1
                     if self._ollama_found_polls >= 2 and not getattr(self, "_ollama_serve_started", False):
                         self._ollama_serve_started = True
-                        try:
-                            if IS_MAC and os.path.isdir("/Applications/Ollama.app"):
-                                subprocess.Popen(["open", "-a", "Ollama"])
-                            else:
-                                subprocess.Popen([exe, "serve"], stdout=subprocess.DEVNULL,
-                                                 stderr=subprocess.DEVNULL, creationflags=_NO_WINDOW,
-                                                 env=_system_env())
-                            log(f"[OLLAMA] 已找到 {exe}，主動啟動服務")
-                        except Exception as e:
-                            log(f"[OLLAMA] 啟動服務失敗: {e}")
+                        self._start_ollama_service(exe)
                 self.root.after(5000, self._oem_check_ollama_installed)
         threading.Thread(target=_check, daemon=True).start()
+
+    def _start_ollama_service(self, exe):
+        """啟動 OLLAMA 服務。macOS 開 Ollama.app；Windows 優先開 ollama app.exe（含托盤圖示），
+        找不到才退回無視窗的 ollama serve（此時不會有托盤圖示）。"""
+        try:
+            if IS_MAC and os.path.isdir("/Applications/Ollama.app"):
+                subprocess.Popen(["open", "-a", "Ollama"])
+                log("[OLLAMA] 已啟動 Ollama.app")
+                return
+            if IS_WIN:
+                _app = os.path.join(os.path.dirname(exe), "ollama app.exe")
+                if os.path.isfile(_app):
+                    _env = os.environ.copy()
+                    _env["PATH"] = os.path.dirname(exe) + os.pathsep + _env.get("PATH", "")
+                    # 啟動參數沒有「最小化」選項；官方安裝腳本靠 %LOCALAPPDATA%\Ollama\upgraded 標記檔
+                    # 讓程式啟動時隱藏主視窗（只留托盤），程式啟動後會自行刪除該檔
+                    try:
+                        _mdir = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Ollama")
+                        if os.path.isdir(_mdir):
+                            open(os.path.join(_mdir, "upgraded"), "a").close()
+                    except Exception as e:
+                        log(f"[OLLAMA] 建立隱藏啟動標記失敗: {e}")
+                    subprocess.Popen([_app], env=_env)
+                    log(f"[OLLAMA] 已啟動 {_app}")
+                    return
+            subprocess.Popen([exe, "serve"], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, creationflags=_NO_WINDOW,
+                             env=_system_env())
+            log(f"[OLLAMA] 已找到 {exe}，主動啟動服務 (serve)")
+        except Exception as e:
+            log(f"[OLLAMA] 啟動服務失敗: {e}")
 
     def _oem_ollama_ready(self):
         for btn in getattr(self, "_oem_pull_btns", []):
@@ -7379,35 +7634,132 @@ class LangForgeApp:
                 pass
 
     def _oem_pull_gemma(self):
-        """OEM: 下載 gemma4:12b-it-qat。"""
+        """下載預設模型（OLLAMA_DEFAULT_MODEL）：先顯示模型資訊並取得確認，
+        再於進度視窗中呈現 ollama pull 的原始輸出，成功後以 /api/tags 確認模型存在。"""
+        model = OLLAMA_DEFAULT_MODEL
+        cmd_text = f"ollama pull {model}"
+        if not self._notice_dialog(S("title_model_pull"),
+                                   S("msg_model_pull").format(model=model, cmd=cmd_text),
+                                   S("btn_start_download"), S("btn_cancel")):
+            log("[OLLAMA] 使用者取消下載模型")
+            return
         for btn in getattr(self, "_oem_pull_btns", []):
             try:
                 btn.config(state="disabled")
             except Exception:
                 pass
-        self._set_status(S("status_oem_pulling"), "orange")
-        def _pull():
+        self._set_status(S("status_oem_pulling").format(model=model), "orange")
+
+        # ── 進度視窗：狀態說明 + ollama pull 原始輸出 ──
+        win = tk.Toplevel(self.root)
+        win.title(S("title_pull_progress"))
+        _load_app_icon(win)
+        win.transient(self.root)
+        win.geometry("700x320")
+        st_var = tk.StringVar(value=S("pull_st_connect"))
+        ttk.Label(win, textvariable=st_var, font=("Arial", 10, "bold")).pack(anchor="w", padx=12, pady=(10, 2))
+        ttk.Label(win, text=cmd_text, foreground="gray").pack(anchor="w", padx=12)
+        txt = tk.Text(win, height=10, state="disabled", wrap="none", font=("Consolas", 9))
+        txt.pack(fill="both", expand=True, padx=12, pady=8)
+        win.protocol("WM_DELETE_WINDOW", lambda: None)  # 下載中不可關閉，結束時由 _finish 關閉
+
+        def _ui(fn, *a):
             try:
-                result = subprocess.run(
-                    [_find_ollama_exe() or "ollama", "pull", "gemma4:12b-it-qat"],
-                    capture_output=True, text=True, timeout=3600,
+                self.root.after(0, fn, *a)
+            except Exception:
+                pass
+
+        def _show(lines, stage):
+            try:
+                txt.config(state="normal")
+            except tk.TclError:
+                return
+            txt.delete("1.0", "end")
+            txt.insert("end", "\n".join(lines[-200:]))
+            txt.see("end")
+            txt.config(state="disabled")
+            if stage:
+                st_var.set(S(stage))
+
+        def _finish(ok, msg_key, detail=""):
+            for btn in getattr(self, "_oem_pull_btns", []):
+                try:
+                    btn.config(state="normal")
+                except Exception:
+                    pass
+            try:
+                win.destroy()
+            except tk.TclError:
+                pass
+            if ok:
+                self._set_status(S("status_oem_pull_done").format(model=model), "green")
+                self._refresh_ollama_models()
+                self._oem_hide_install_ui()
+                if self._notice_dialog(S("title_pull_done"), S("msg_pull_done"),
+                                       S("btn_start_use"), S("btn_close")):
+                    # 「開始使用」：回到主視窗即可使用已更新的模型清單
+                    try:
+                        self.root.lift()
+                    except Exception:
+                        pass
+            else:
+                self._set_status(S(msg_key), "red")
+                body = S(msg_key)
+                if detail:
+                    body += f"\n\n{S('lbl_tech_detail')}\n{detail[-300:]}"
+                self._notice_dialog(S("title_pull_error"), body, S("btn_close"))
+
+        def _pull():
+            import codecs
+            term = _TermBuf()
+            dec = codecs.getincrementaldecoder("utf-8")("ignore")
+            stage = "pull_st_connect"
+            last_ui = 0.0
+            try:
+                exe = _find_ollama_exe()
+                if not exe:
+                    _ui(_finish, False, "err_ollama_down", "ollama executable not found")
+                    return
+                proc = subprocess.Popen(
+                    [exe, "pull", model], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     creationflags=_NO_WINDOW, env=_system_env()
                 )
-                if result.returncode == 0:
-                    self.root.after(0, lambda: self._set_status(S("status_oem_pull_done"), "green"))
-                    self.root.after(0, self._refresh_ollama_models)
-                    self.root.after(0, self._oem_hide_install_ui)
+                def _stage_of(lines):
+                    low = [l.lower() for l in lines]
+                    if any(l.startswith("pulling ") and "manifest" not in l for l in low):
+                        return "pull_st_downloading"
+                    if any(("manifest" in l or "verifying" in l) for l in low):
+                        return "pull_st_verifying"
+                    return "pull_st_connect"
+
+                # 逐塊讀取並以終端機模擬還原 ollama 的原始進度畫面
+                while True:
+                    chunk = os.read(proc.stdout.fileno(), 4096)
+                    if not chunk:
+                        break
+                    term.feed(dec.decode(chunk))
+                    if time.time() - last_ui >= 0.15:
+                        last_ui = time.time()
+                        lines = term.lines()
+                        stage = _stage_of(lines)
+                        _ui(_show, lines, stage)
+                proc.wait()
+                lines = term.lines()
+                _ui(_show, lines, _stage_of(lines))
+                output = "\n".join(l for l in lines if l.strip())
+                if proc.returncode != 0:
+                    log(f"[OLLAMA] pull 失敗 (exit {proc.returncode}): {output[-200:]}")
+                    _ui(_finish, False, _classify_pull_error(output), output)
+                    return
+                _ui(st_var.set, S("pull_st_verify_check"))
+                if _ollama_has_model(model):
+                    _ui(_finish, True, "")
                 else:
-                    err = (result.stderr or "未知錯誤")[:60]
-                    self.root.after(0, lambda: self._set_status(S("status_api_unknown"), "red"))
-                    log(f"[OEM] pull 失敗: {err}")
-                    for btn in getattr(self, "_oem_pull_btns", []):
-                        self.root.after(0, lambda b=btn: b.config(state="normal"))
+                    log(f"[OLLAMA] pull 成功但 /api/tags 找不到 {model}")
+                    _ui(_finish, False, "err_model_unrecognized", output)
             except Exception as e:
-                self.root.after(0, lambda: self._set_status(S("status_api_unknown"), "red"))
-                log(f"[OEM] pull 例外: {e}")
-                for btn in getattr(self, "_oem_pull_btns", []):
-                    self.root.after(0, lambda b=btn: b.config(state="normal"))
+                log(f"[OLLAMA] pull 例外: {e}")
+                _ui(_finish, False, "err_pull_failed", str(e))
         threading.Thread(target=_pull, daemon=True).start()
 
     def _stop_running_ollama_model(self):
