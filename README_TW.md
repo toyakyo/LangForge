@@ -32,7 +32,7 @@
 
 ### 方式一：下載執行檔（推薦）
 
-1. 從[下載頁面](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php#download)下載最新版 `LangForge_V1.5.18.zip`
+1. 從[下載頁面](https://goonsoft.tw2.nde.tw/tutorial/tutorial.php#download)下載最新版 `LangForge_V1.5.19.zip`
 2. 解壓縮後直接執行 `LangForge.exe`（無需安裝 Python）
 3. 建議執行前驗證 SHA256：
 
@@ -124,7 +124,7 @@ python LangForge.py
 
 | 版本 | 日期 | 重點 |
 | --- | --- | --- |
-| V1.5.19 | 2026-10-30 | 安裝 OLLAMA／下載模型前新增說明與確認視窗，顯示實際 `ollama pull` 進度並於完成後確認模型可用，補齊網路／空間／服務未啟動等錯誤提示；已安裝 OLLAMA 時改為直接啟動（Windows 原始碼版；Windows 打包檔待發布） |
+| V1.5.19 | 2026-10-30 | 安裝 OLLAMA／下載模型前新增說明與確認視窗，顯示實際 `ollama pull` 進度並於完成後確認模型可用，補齊網路／空間／服務未啟動等錯誤提示；已安裝 OLLAMA 時改為直接啟動 |
 | V1.5.18 | 2026-10-13 | 新增「關於 → 第三方授權」聲明；移除 chardet（LGPL）相依 |
 | V1.5.17 | 2026-10-12 | 公開版不再附帶 OEM 授權相關資源檔 |
 | V1.5.16 | 2026-10-09 | 移除本地 OCR 模式（EXE 約 205 MB → 約 49 MB）、修正 OLLAMA 安裝流程 |
